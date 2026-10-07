@@ -6,8 +6,8 @@ import { rampHeight } from '../sim/systems/world';
 import { brickFacadeTexture, detailNoise, stoneFacadeTexture, facadeTexture, groundTexture, latticeTexture, stoneTexture, viaductTexture } from './textures';
 import { buildCity } from './city';
 import { buildDistricts } from './districts';
-import { buildShibuyaBlock } from './shibuyaBlock';
-import { artMode } from './artStyle';
+import { buildShibuya } from './shibuya';
+import { buildStairLights } from './stairLights';
 import { buildBases, buildLockPoints } from './objectives';
 import { NIGHT_GLOW } from './nightGlow';
 
@@ -302,6 +302,8 @@ function buildWorld(scene: THREE.Scene): void {
     if (CITY_MATS.has(p.mat)) continue;
     // Drawn as custom landmarks instead.
     if (p.group === 'radioTower' || p.group === 'tokyoTowerSpire' || p.group === 'tokyoTowerLeg' || p.group === 'dome') continue;
+    // Shibuya's decks, stairs, gate and subway entrance are drawn by render/shibuya.ts.
+    if (p.group === 'skyway' || p.group === 'shibuya') continue;
     if (p.kind === 'ramp') { add(matKey(p), rampGeometry(p)); continue; }
     const b = p as BoxPrim;
     const h = b.y1 - b.y0, key = matKey(b);
@@ -594,8 +596,9 @@ export function buildScene(canvas: HTMLCanvasElement): SceneRefs {
   buildBases(scene);
   buildLockPoints(scene);
   buildDistricts(scene);
-  // v9.2 art prototype: the Shibuya showcase block (scenery only).
-  if (artMode() !== 'off') buildShibuyaBlock(scene);
+  // v10 MAP REFORGE: the rebuilt centre of Shibuya (the Golden Sector).
+  buildShibuya(scene);
+  buildStairLights(scene);
   const train = buildRailway(scene);
   // A fixed handful of lamp lights (never more or fewer: that would recompile every material).
   const lights: THREE.PointLight[] = [];
@@ -631,7 +634,8 @@ export function updateStreetLights(refs: SceneRefs, x: number, z: number, y = 0)
   lamps.at = { x, z };
   const near: { d: number; hx: number; hz: number }[] = [];
   for (const l of LIGHTS) {
-    const hx = l.x + Math.cos(l.ang) * 62, hz = l.z + Math.sin(l.ang) * 62;
+    const reach = l.wall ? 22 : 62;
+    const hx = l.x + Math.cos(l.ang) * reach, hz = l.z + Math.sin(l.ang) * reach;
     const d = Math.hypot(hx - x, hz - z);
     if (d > LAMP_REACH * 1.3) continue;
     near.push({ d, hx, hz });

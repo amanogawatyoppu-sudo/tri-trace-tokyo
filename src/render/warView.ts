@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { NATIONS } from '../config/nations';
 import type { GameState } from '../sim/state';
 import { NATION_IDS } from '../config/nations';
-import { BOUNDS, BUILDINGS, GROUND_FLOOR, LIGHTS, insideLoop } from '../config/map';
+import { BOUNDS, BUILDINGS, GROUND_FLOOR, LIGHTS, WORLD, insideLoop } from '../config/map';
 import { POINT_R, SECTORS, sectorAt, sectorPoint } from '../sim/war';
 import { radialGlowTexture } from './textures';
 import { NIGHT_GLOW } from './nightGlow';
@@ -59,6 +59,8 @@ interface PointView {
   ring: THREE.MeshBasicMaterial;
   gauge: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   flag: THREE.Object3D;
+  /** Light strength (1, or less where the point stands on stairs and its glow would wash them out). */
+  glare: number;
   owner: string;
   shownProgress: number;
 }
@@ -112,7 +114,7 @@ export class WarView {
       const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
       const spots: THREE.Matrix4[] = [];
       for (const l of LIGHTS) {
-        if (!insideLoop(l.x, l.z, 0)) continue;
+        if (!insideLoop(l.x, l.z, 0) || l.wall) continue;
         spots.push(new THREE.Matrix4().compose(new THREE.Vector3(l.x - Math.cos(l.ang) * 5, 150, l.z - Math.sin(l.ang) * 5), new THREE.Quaternion().setFromAxisAngle(up, -l.ang + Math.PI), one));
       }
       const OUT: Record<string, [number, number]> = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
@@ -176,9 +178,12 @@ export class WarView {
       const beamMesh = new THREE.Mesh(beamGeo, beam), coreMesh = new THREE.Mesh(coreGeo, core), poolMesh = new THREE.Mesh(poolGeo, pool);
       beamMesh.renderOrder = coreMesh.renderOrder = poolMesh.renderOrder = 2;
       poolMesh.position.y = 1;
+      // A point at the foot of a stair (東京タワー下): a tighter, dimmer glow so the steps stay readable (v10).
+      const onStairs = WORLD.some((w) => w.kind === 'ramp' && Math.abs(p.x - w.x) < w.w / 2 + POINT_R / 2 && Math.abs(p.z - w.z) < w.d / 2 + POINT_R / 2);
+      if (onStairs) poolMesh.scale.setScalar(0.55);
       g.add(beamMesh, coreMesh, poolMesh);
       scene.add(g);
-      this.points.push({ beam, core, pool, banner, canvas, tex, ring, gauge, flag, owner: '', shownProgress: 0 });
+      this.points.push({ beam, core, pool, banner, canvas, tex, ring, gauge, flag, glare: onStairs ? 0.45 : 1, owner: '', shownProgress: 0 });
     });
   }
 
@@ -265,9 +270,9 @@ export class WarView {
       const pulse = s.contested ? 0.7 + 0.3 * Math.sin(t * 9) : 0.85 + 0.15 * Math.sin(t * 1.5 + i);
       // Additive light reads far stronger on sunlit pavement: dimmer by day, full at night (v9.1).
       const day = 0.5 + 0.5 * lightK;
-      v.beam.opacity = (s.owner ? 0.3 : 0.14) * pulse * day;
-      v.core.opacity = (s.owner ? 0.7 : 0.35) * pulse * (0.7 + 0.3 * lightK);
-      v.pool.opacity = (s.owner ? 0.85 : 0.4) * pulse * day;
+      v.beam.opacity = (s.owner ? 0.3 : 0.14) * pulse * day * v.glare;
+      v.core.opacity = (s.owner ? 0.7 : 0.35) * pulse * (0.7 + 0.3 * lightK) * (0.4 + 0.6 * v.glare);
+      v.pool.opacity = (s.owner ? 0.85 : 0.4) * pulse * day * v.glare;
       v.ring.opacity = s.contested ? 0.35 + 0.3 * Math.sin(t * 7) : 0.3;
       // The holo panel swings slowly (faster while contested) so it reads from most streets.
       v.flag.rotation.y = Math.sin(t * (s.contested ? 1.6 : 0.45) + i) * 0.75 + i * 0.7;

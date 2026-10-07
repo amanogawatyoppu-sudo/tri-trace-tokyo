@@ -130,7 +130,7 @@ export function streetPropSpots(): PropSpot[] {
     && !posts.some((l) => l.x > r.x0 - 8 && l.x < r.x1 + 8 && l.z > r.z0 - 8 && l.z < r.z1 + 8)
     && !spots!.some((o) => r.x0 < o.x1 + 3 && r.x1 > o.x0 - 3 && r.z0 < o.z1 + 3 && r.z1 > o.z0 - 3);
   for (const b of BUILDINGS) {
-    if (b.outside || b.h < 60) continue;
+    if (b.outside || b.custom || b.h < 60) continue;
     // The building's own collision box (props stand against it, so it does not count as an obstacle).
     const self = WORLD.find((p) => p.mat === 'bldg' && p.x === b.x && p.z === b.z) as BoxPrim | undefined;
     const rnd = prng(b.seed * 7 + 3);

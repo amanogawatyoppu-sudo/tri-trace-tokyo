@@ -6,8 +6,8 @@ import {
   STREET_SEGS, WIRES, WORLD, prng,
 } from '../config/map';
 import {
-  SHOP_CELLS, ROAD_TILE_V, asphaltTexture, facadeTexture, paverTexture, roadTexture, roofTexture, roofTileTexture, shopAtlas,
-  radialGlowTexture, signAtlas, tactileTexture, vendingTexture, windowGlowTexture,
+  SHOP_CELLS, ROAD_TILE_V, asphaltTexture, paverTexture, roadTexture, roofTexture, roofTileTexture, shopAtlas,
+  radialGlowTexture, sharedFacadeTexture, signAtlas, tactileTexture, vendingTexture,
 } from './textures';
 import type { FacadeKind } from './textures';
 import { buildStreetProps } from './streetProps';
@@ -266,7 +266,7 @@ export function buildCity(scene: THREE.Scene): void {
   const G = (k: string) => (geos[k] ??= new Geo());
   for (const k of ['glass', 'concrete', 'tileA', 'tileB', 'apartment', 'house', 'shop', 'roof', 'roofTile', 'sign', 'avenue', 'street', 'alley', 'asphalt', 'zebra', 'paver', 'curb', 'tactile', 'lines']) G(k);
   const props: Props = { machine: [], ac: [], tank: [] };
-  for (const b of BUILDINGS) addBuilding(b, geos, props);
+  for (const b of BUILDINGS) if (!b.custom) addBuilding(b, geos, props);
 
   // Streets: segments with markings, plain asphalt at intersections.
   for (const s of STREET_SEGS) {
@@ -325,16 +325,16 @@ export function buildCity(scene: THREE.Scene): void {
   }
 
   const tex = (t: THREE.Texture) => t;
-  const lit = (k: FacadeKind) => ({ emissive: 0xffffff, emissiveMap: windowGlowTexture(k), emissiveIntensity: 0.45 });
+  const lit = (k: FacadeKind) => ({ emissive: 0xffffff, emissiveMap: sharedFacadeTexture(k, true), emissiveIntensity: 0.45 });
   const shop = tex(shopAtlas()), sign = tex(signAtlas(artMode() !== 'off'));
   const mats: Record<string, THREE.Material> = {
     // Dusk: windows light up (emissive maps of the lit panes).
-    glass: std(0xffffff, { map: facadeTexture('glass'), vertexColors: true, roughness: 0.35, metalness: 0.25, ...lit('glass') }),
-    concrete: std(0xffffff, { map: facadeTexture('concrete'), vertexColors: true, ...lit('concrete') }),
-    tileA: std(0xffffff, { map: facadeTexture('tileA'), vertexColors: true, ...lit('tileA') }),
-    tileB: std(0xffffff, { map: facadeTexture('tileB'), vertexColors: true, ...lit('tileB') }),
-    apartment: std(0xffffff, { map: facadeTexture('apartment'), vertexColors: true, ...lit('apartment') }),
-    house: std(0xffffff, { map: facadeTexture('house'), vertexColors: true, ...lit('house') }),
+    glass: std(0xffffff, { map: sharedFacadeTexture('glass'), vertexColors: true, roughness: 0.35, metalness: 0.25, ...lit('glass') }),
+    concrete: std(0xffffff, { map: sharedFacadeTexture('concrete'), vertexColors: true, ...lit('concrete') }),
+    tileA: std(0xffffff, { map: sharedFacadeTexture('tileA'), vertexColors: true, ...lit('tileA') }),
+    tileB: std(0xffffff, { map: sharedFacadeTexture('tileB'), vertexColors: true, ...lit('tileB') }),
+    apartment: std(0xffffff, { map: sharedFacadeTexture('apartment'), vertexColors: true, ...lit('apartment') }),
+    house: std(0xffffff, { map: sharedFacadeTexture('house'), vertexColors: true, ...lit('house') }),
     shop: std(0xffffff, { map: shop, emissive: 0xffffff, emissiveMap: shop, emissiveIntensity: 0.42 }),
     roof: std(0xffffff, { map: roofTexture(), vertexColors: true, roughness: 0.95 }),
     roofTile: std(0xffffff, { map: roofTileTexture(), vertexColors: true, roughness: 0.8 }),
@@ -470,6 +470,7 @@ function buildFurniture(scene: THREE.Scene): void {
   // Street lights: pole, arm over the road, lamp head.
   const lpM: THREE.Matrix4[] = [], laM: THREE.Matrix4[] = [], lhM: THREE.Matrix4[] = [];
   for (const l of LIGHTS) {
+    if (l.wall) continue; // façade lamps: bracket and head drawn with their building
     const dx = Math.cos(l.ang), dz = Math.sin(l.ang);
     lpM.push(at(l.x, 115, l.z));
     laM.push(at(l.x + dx * 30, 228, l.z + dz * 30, -l.ang));
@@ -483,8 +484,9 @@ function buildFurniture(scene: THREE.Scene): void {
   const heads = new Float32Array(LIGHTS.length * 3);
   const pools: THREE.Matrix4[] = [];
   LIGHTS.forEach((l, i) => {
-    const hx = l.x + Math.cos(l.ang) * 62, hz = l.z + Math.sin(l.ang) * 62;
-    heads.set([hx, 216, hz], i * 3);
+    const reach = l.wall ? 22 : 62;
+    const hx = l.x + Math.cos(l.ang) * reach, hz = l.z + Math.sin(l.ang) * reach;
+    heads.set([hx, l.wall ? 184 : 216, hz], i * 3);
     pools.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2).setPosition(hx, 1.2, hz));
   });
   const haloGeo = new THREE.BufferGeometry();

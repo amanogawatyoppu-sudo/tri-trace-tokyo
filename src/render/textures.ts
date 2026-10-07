@@ -256,6 +256,14 @@ function pane(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
 }
 
 export type FacadeKind = 'glass' | 'concrete' | 'tileA' | 'tileB' | 'apartment' | 'house';
+const sharedFacades = new Map<string, THREE.CanvasTexture>();
+/** One façade texture (and one lit-window map) per kind for the whole city, shared by every mesh that uses it. */
+export function sharedFacadeTexture(kind: FacadeKind, glow = false): THREE.CanvasTexture {
+  const key = kind + (glow ? ':glow' : '');
+  let t = sharedFacades.get(key);
+  if (!t) sharedFacades.set(key, (t = glow ? windowGlowTexture(kind) : facadeTexture(kind)));
+  return t;
+}
 /** Façade tile: 2 bays wide, 4 storeys tall (256 × 512 px). */
 /** Which windows of a façade glow at dusk (same layout as `facadeTexture(kind)`), for its emissive map. */
 export function windowGlowTexture(kind: FacadeKind): THREE.CanvasTexture {
