@@ -77,7 +77,7 @@ export const MAZE_MAP = [
 
 /** Storeys, fronts and skins of the maze buildings (footprints come from MAZE_MAP). */
 export const MAZE_BUILDINGS: Record<string, Omit<ShibuyaBuilding, 'id' | 'x0' | 'z0' | 'x1' | 'z1'>> = {
-  A: { floors: 9, fronts: ['n', 'w', 'e'], skin: 'dark', screen: 'n', roof: 'billboard' }, // pencil tower on the scramble corner
+  A: { floors: 9, fronts: ['n', 'w', 'e'], skin: 'dark', roof: 'billboard' }, // pencil tower on the scramble corner (no screen: it stood right against the skywalk)
   B: { floors: 6, fronts: ['n', 'e', 'w'], skin: 'tileB', screen: 'n', service: 's', roof: 'plant' },
   C: { floors: 2, fronts: ['s', 'w'], skin: 'concrete', service: 'n', roof: 'plant' },
   D: { floors: 4, fronts: ['w', 'e', 'n'], skin: 'tileA', service: 's' },

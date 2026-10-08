@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { BoxPrim, RampPrim } from '../config/map';
 import { CURB, GROUND_FLOOR, LIGHTS, LOOP, SHIBUYA_BUILT, STATIONS, STOREY, VIADUCT, WORLD, insideLoop, prng } from '../config/map';
 import type { ShibuyaBuilding, ShibuyaSide } from '../config/shibuya';
-import { HALO_SCREEN, MAZE, MAZE_GATE, MAZE_MAP, SHIBUYA_CROSSING, SKY_DECKS, SKY_H, SUBWAY } from '../config/shibuya';
+import { HALO_SCREEN, MAZE, MAZE_GATE, MAZE_MAP, SHIBUYA_CROSSING, SKY_DECKS, SKY_H, SKY_LEGS, SUBWAY } from '../config/shibuya';
 import { NIGHT_GLOW, glowAtNight } from './nightGlow';
 import { nearFade } from './city';
 import { radialGlowTexture, sharedFacadeTexture } from './textures';
@@ -194,7 +194,7 @@ function atlas(): THREE.CanvasTexture {
       text('RUN', x + 50, y + 120, 84, '#ffffff', 'left', '900');
       text('THE CITY', x + 50, y + 196, 56, css(0xb46bff), 'left', '900');
     }
-    g.fillStyle = 'rgba(0,0,0,.18)';
+    g.fillStyle = 'rgba(0,0,0,.1)';
     for (let r = 0; r < h; r += 4) g.fillRect(x, y + r, w, 1);
   }
   // Shops in the railway arches (ガード下).
@@ -274,12 +274,13 @@ function atlas(): THREE.CanvasTexture {
   for (let i = 0; i < 2; i++) {
     const [x, y, w, h] = CELLS.vscreen(i);
     const grd = g.createLinearGradient(x, y, x, y + h);
-    grd.addColorStop(0, i ? '#3b0c3f' : '#06222a'); grd.addColorStop(1, i ? '#100a26' : '#2a0c36');
+    // Mid-tone grounds (a near-black screen read as a blank black wall from the decks).
+    grd.addColorStop(0, i ? '#8a2f8e' : '#1f7a80'); grd.addColorStop(1, i ? '#3a2a86' : '#6a2c84');
     g.fillStyle = grd; g.fillRect(x, y, w, h);
-    for (let k = 0; k < 6; k++) { g.fillStyle = css(L[(k + i) % 3], 0.5); g.fillRect(x + 10 + (k % 2) * 56, y + 20 + k * 48, 52, 34); }
+    for (let k = 0; k < 6; k++) { g.fillStyle = css(L[(k + i) % 3], 0.75); g.fillRect(x + 10 + (k % 2) * 56, y + 20 + k * 48, 52, 34); }
     const word = i ? '渋谷' : '走れ';
     [...word].forEach((ch, k) => text(ch, x + w / 2, y + 110 + k * 100, 92, '#ffffff', 'center', '900'));
-    g.fillStyle = 'rgba(0,0,0,.18)';
+    g.fillStyle = 'rgba(0,0,0,.1)';
     for (let r = 0; r < h; r += 4) g.fillRect(x, y + r, w, 1);
   }
   {
@@ -343,6 +344,17 @@ const along = (f: Face, s: number, out: number): [number, number] => {
 };
 const SIDES: ShibuyaSide[] = ['n', 's', 'e', 'w'];
 
+/**
+ * Sign hierarchy (final polish): the HERO signs carry the district and lead the eye (the
+ * screens facing the scramble, the SKY RING fascia, the NEON MAZE gate; HALO VISION has its own
+ * level); the SUPPORT signs are the shop fronts and the wayfinding; the BACKGROUND signs (blade
+ * signs, floor directories, tickers, roof billboards, shutters) stay dim so they add density
+ * without competing.
+ */
+const HERO_SCREENS = ['H1', 'NW2', 'B'];
+/** Lit windows on the middle storeys: warm and cool interiors (no faction hue). */
+const WINDOW_LIGHTS = [0xffe6c4, 0xfff4e6, 0xd8e8ff, 0xf2dcff];
+
 /** Façade tile size (as the generic city): 2 bays wide, 4 storeys tall. */
 const TILE_U = 200, TILE_V = 4 * STOREY;
 const SKIN: Record<ShibuyaBuilding['skin'], { tex: FacadeKind; tint: number }> = {
@@ -350,7 +362,7 @@ const SKIN: Record<ShibuyaBuilding['skin'], { tex: FacadeKind; tint: number }> =
   tileB: { tex: 'tileB', tint: 0xe3e0e6 },
   concrete: { tex: 'concrete', tint: 0xd8d4cc },
   glass: { tex: 'glass', tint: 0xdfe6ee },
-  dark: { tex: 'glass', tint: 0x6a6878 },
+  dark: { tex: 'tileB', tint: 0x8a8898 }, // dark tile, not dark glass: a 9-storey black glass wall read as a blank slab
 };
 
 export interface ShibuyaStats { buildings: number; bays: number; screens: number; meshes: number; instanced: number; triangles: number; lamps: number }
@@ -360,7 +372,7 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
   const rnd = prng(1010);
   const L = SHIBUYA_LIGHTS;
   // Merge buckets.
-  const lit: THREE.BufferGeometry[] = [], solid: THREE.BufferGeometry[] = [], glow: THREE.BufferGeometry[] = [], ground: THREE.BufferGeometry[] = [];
+  const lit: THREE.BufferGeometry[] = [], hero: THREE.BufferGeometry[] = [], back: THREE.BufferGeometry[] = [], halo: THREE.BufferGeometry[] = [], win: THREE.BufferGeometry[] = [], glass: THREE.BufferGeometry[] = [], solid: THREE.BufferGeometry[] = [], glow: THREE.BufferGeometry[] = [], ground: THREE.BufferGeometry[] = [];
   const pools: THREE.BufferGeometry[] = [], holo: THREE.BufferGeometry[] = [];
   const skins: Record<string, THREE.BufferGeometry[]> = {};
   // Instanced pieces.
@@ -405,6 +417,53 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
       const ang = Math.atan2(f.nx, f.nz);
       // Middle storeys (and the whole wall on the blind sides).
       facade(b, f, front ? GF : 0, top, tintC, uOff);
+      // Middle storeys: a slab line at every floor and some lit rooms, so no wall reads as one flat plane.
+      {
+        const [cx, cz] = along(f, f.len / 2, 1.2);
+        for (let k = 2; k <= b.floors; k++) solid.push(tint(boxAt(f.nx ? 2.4 : f.len, 4, f.nx ? f.len : 2.4, cx, GF + (k - 2) * STOREY, cz), 0x4a4b52));
+        if (side !== b.screen) {
+          const cols = Math.floor((f.len - 20) / 50);
+          for (let k = 2; k <= b.floors; k++) for (let c = 0; c < cols; c++) {
+            if (br() > (front ? 0.4 : 0.5)) continue;
+            const [wx, wz] = along(f, 10 + (c + 0.5) * ((f.len - 20) / cols), 0.9);
+            win.push(tint(quad(36, 46, CELLS.swatch(0), wx, GF + (k - 2) * STOREY + STOREY / 2, wz, f.nx, f.nz), WINDOW_LIGHTS[Math.floor(br() * 4)]));
+          }
+        }
+      }
+      // Blind sides (the backs the decks and lanes look at): pipes, air-con on brackets, the steel
+      // frame of a sign seen from behind, meter boxes and a bin by the back door.
+      if (!front && side !== b.service) {
+        for (const s of [f.len * 0.22, f.len * 0.78]) {
+          const [px, pz] = along(f, s, 5);
+          pipes.push(M4(px, top / 2, pz, 0, 1.3, top, 1.3));
+        }
+        // From the second storey up: at street level a unit would sit right in the chase camera's path.
+        for (let k = 2; k <= b.floors; k++) {
+          if (br() < 0.4) continue;
+          const s = 40 + br() * Math.max(1, f.len - 80), y = GF + (k - 1) * STOREY - 46;
+          const [ax, az] = along(f, s, 17);
+          acs.push(M4(ax, y, az, Math.atan2(f.nx, f.nz), 0.7, 0.7, 0.7));
+          const [kx, kz] = along(f, s, 9);
+          solid.push(tint(boxAt(f.nx ? 18 : 28, 3, f.nx ? 28 : 18, kx, y - 12, kz), STEEL));
+        }
+        if (b.floors >= 4 && f.len >= 90) {
+          const fw = Math.min(140, f.len - 40), fh = 120, y = GF + STOREY * 1.5 + fh / 2;
+          const [fx, fz] = along(f, f.len / 2, 7);
+          const bar = (w: number, h: number, ox: number, oy: number) => {
+            const [qx, qz] = along(f, f.len / 2 + ox, 7);
+            solid.push(tint(boxAt(f.nx ? 3 : w, h, f.nx ? w : 3, qx, oy, qz), 0x45474e));
+          };
+          for (const oy of [-fh / 2, 0, fh / 2]) bar(fw, 4, 0, y + oy);
+          for (const ox of [-fw / 2, -fw / 6, fw / 6, fw / 2]) bar(4, fh, ox, y);
+          solid.push(tint(boxAt(f.nx ? 2 : fw, fh, f.nx ? fw : 2, fx - f.nx * 4, y, fz - f.nz * 4), 0x2b2c31));
+        }
+        if (f.len >= 140) {
+          const [mx, mz] = along(f, 74, 4);
+          solid.push(tint(boxAt(f.nx ? 8 : 26, 34, f.nx ? 26 : 8, mx, 50, mz), 0x8a8d8f));
+          const [gx, gz] = along(f, 100, 12);
+          solid.push(tint(boxAt(20, 30, 20, gx, CURB + 15, gz), 0x3d5a4a));
+        }
+      }
       if (front) {
         // Street level: bays of ≈ 6 m — show window, name band, sometimes an awning; pillars between.
         const n = Math.max(1, Math.round((f.len - 16) / 150)), bw = (f.len - 16) / n;
@@ -437,7 +496,7 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
           const s = f.len > 200 ? f.len * 0.3 : f.len / 2;
           for (let k = 2; k <= Math.min(b.floors, 6); k++) {
             const [qx, qz] = along(f, s, 1.4);
-            lit.push(quad(Math.min(96, f.len - 30), 12, CELLS.floor(fi++ % FLOORS.length), qx, GF + (k - 2) * STOREY + STOREY - 14, qz, f.nx, f.nz));
+            back.push(quad(Math.min(96, f.len - 30), 12, CELLS.floor(fi++ % FLOORS.length), qx, GF + (k - 2) * STOREY + STOREY - 14, qz, f.nx, f.nz));
           }
         }
         // Projecting blade signs, readable from both directions along the street.
@@ -448,8 +507,8 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
             if (hh < 80) continue;
             const [sx, sz] = along(f, s, 30);
             const cell = CELLS.blade(bi++ % 8);
-            lit.push(quad(38, hh, cell, sx + tx * 0.6, b0 + hh / 2, sz + tz * 0.6, tx, tz));
-            lit.push(quad(38, hh, cell, sx - tx * 0.6, b0 + hh / 2, sz - tz * 0.6, -tx, -tz));
+            back.push(quad(38, hh, cell, sx + tx * 0.6, b0 + hh / 2, sz + tz * 0.6, tx, tz));
+            back.push(quad(38, hh, cell, sx - tx * 0.6, b0 + hh / 2, sz - tz * 0.6, -tx, -tz));
             const [mx, mz] = along(f, s, 6);
             solid.push(tint(boxAt(3, 3, 12, mx, t2 - 6, mz, ang), FRAME), tint(boxAt(3, 3, 12, mx, b0 + 6, mz, ang), FRAME));
           }
@@ -460,7 +519,7 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
         solid.push(tint(boxAt(30, 70, 2, dx, 35, dz, ang), 0x55585e));
         if (f.len > 140) {
           const [gx, gz] = along(f, f.len - 60, 1.2);
-          lit.push(quad(80, 70, CELLS.garage(2), gx, 39, gz, f.nx, f.nz));
+          back.push(quad(80, 70, CELLS.garage(2), gx, 39, gz, f.nx, f.nz));
         }
       }
       // Service side: fire escape, pipes and air-con units.
@@ -493,11 +552,13 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
         const w = vertical ? f.len - 24 : Math.min(260, f.len - 50), h = vertical ? Math.min(top - GF - 80, 300) : w * 0.5625;
         const y = GF + 30 + h / 2;
         const [sx, sz] = along(f, f.len / 2, 4);
-        lit.push(quad(w, h, vertical ? CELLS.vscreen(b.id.charCodeAt(0) & 1) : CELLS.screen(b.id.charCodeAt(0) & 1), sx, y, sz, f.nx, f.nz));
+        (HERO_SCREENS.includes(b.id) ? hero : lit).push(quad(w, h, vertical ? CELLS.vscreen(b.id.charCodeAt(0) & 1) : CELLS.screen(b.id.charCodeAt(0) & 1), sx, y, sz, f.nx, f.nz));
         const [kx, kz] = along(f, f.len / 2, 1);
-        solid.push(tint(boxAt(f.nx ? 6 : w + 10, h + 10, f.nx ? w + 10 : 6, kx, y, kz), 0x121318));
+        solid.push(tint(boxAt(f.nx ? 6 : w + 10, h + 10, f.nx ? w + 10 : 6, kx, y, kz), 0x3b3f47));
+        const [ex, ez] = along(f, f.len / 2, 4.6);
+        for (const dy of [-h / 2 - 3, h / 2 + 3]) glow.push(tint(boxAt(f.nx ? 1 : w + 6, 2, f.nx ? w + 6 : 1, ex, y + dy, ez), L[2]));
         const [tx2, tz2] = along(f, f.len / 2, 4);
-        if (!vertical) lit.push(quad(w, 24, CELLS.ticker, tx2, y - h / 2 - 20, tz2, f.nx, f.nz));
+        if (!vertical) back.push(quad(w, 24, CELLS.ticker, tx2, y - h / 2 - 20, tz2, f.nx, f.nz));
         const [gx, gz] = along(f, f.len / 2, 90);
         pool(gx, gz, 120, L[(b.id.charCodeAt(0) + 1) % 3], CURB + 0.5);
         screens++;
@@ -515,7 +576,7 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
     if (b.roof === 'billboard') {
       const f = faceOf(b, b.fronts[0]), bw = Math.min(f.len * 0.85, 220), bh = 80;
       const [sx, sz] = along(f, f.len / 2, -16);
-      lit.push(quad(bw, bh, CELLS.screen((b.id.charCodeAt(0) + 1) & 1), sx + f.nx * 3, top + 30 + bh / 2, sz + f.nz * 3, f.nx, f.nz));
+      back.push(quad(bw, bh, CELLS.screen((b.id.charCodeAt(0) + 1) & 1), sx + f.nx * 3, top + 30 + bh / 2, sz + f.nz * 3, f.nx, f.nz));
       for (const s of [f.len / 2 - bw / 2 + 10, f.len / 2 + bw / 2 - 10]) {
         const [px, pz] = along(f, s, -18);
         solid.push(tint(boxAt(5, 30 + bh, 5, px, top + (30 + bh) / 2 - 10, pz), STEEL));
@@ -542,11 +603,35 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
   for (const k of SKY_DECKS) {
     const w = k.x1 - k.x0, d = k.z1 - k.z0, cx = (k.x0 + k.x1) / 2, cz = (k.z0 + k.z1) / 2;
     solid.push(tint(boxAt(w, 12, d, cx, SKY_H - 6, cz), 0x8d8a86));
-    ground.push(tint(flat(w - 4, d - 4, cx, SKY_H + 0.4, cz), 0x6e6c6a));
-    // Paving joints across the deck (every ≈ 2 m).
-    const alongX = w > d;
-    for (let t = 40; t < (alongX ? w : d) - 10; t += 52) {
-      ground.push(alongX ? tint(flat(2, d - 6, k.x0 + t, SKY_H + 0.6, cz), 0x55534f) : tint(flat(w - 6, 2, cx, SKY_H + 0.6, k.z0 + t), 0x55534f));
+    const alongX = w > d, len = alongX ? w : d, wid = alongX ? d : w;
+    /** A strip along the deck: s across (from the centre line), t0..t1 along. */
+    const strip = (s: number, sw: number, t0: number, t1: number, y: number, col: number) => ground.push(alongX
+      ? tint(flat(t1 - t0, sw, k.x0 + (t0 + t1) / 2, y, cz + s), col)
+      : tint(flat(sw, t1 - t0, cx + s, y, k.z0 + (t0 + t1) / 2), col));
+    // Deck surface: warm pavers, a darker gutter at both edges, the yellow tactile line down the middle.
+    ground.push(tint(flat(w - 4, d - 4, cx, SKY_H + 0.4, cz), 0x86817a));
+    for (const sg of [-1, 1]) strip(sg * (wid / 2 - 7), 8, 2, len - 2, SKY_H + 0.6, 0x45433f);
+    strip(0, 10, 4, len - 4, SKY_H + 0.7, 0xb8973e);
+    // Paver joints (every ≈ 1 m) and an expansion joint plate every ≈ 9 m.
+    for (let t = 26; t < len - 4; t += 26) {
+      const joint = t % 234 === 0;
+      strip(0, joint ? wid - 4 : wid - 22, t - (joint ? 3 : 0.8), t + (joint ? 3 : 0.8), SKY_H + 0.65, joint ? 0x9a9ea4 : 0x6c6862);
+    }
+    // Structure under the deck: edge girders and cross beams (it reads as a bridge from the street).
+    for (const sg of [-1, 1]) {
+      const [ex, ez] = alongX ? [cx, cz + sg * (wid / 2 - 3)] : [cx + sg * (wid / 2 - 3), cz];
+      solid.push(tint(boxAt(alongX ? len : 6, 18, alongX ? 6 : len, ex, SKY_H - 21, ez), 0x6c7079));
+    }
+    for (let t = 45; t < len - 20; t += 90) {
+      solid.push(tint(alongX ? boxAt(8, 12, wid - 10, k.x0 + t, SKY_H - 18, cz) : boxAt(wid - 10, 12, 8, cx, SKY_H - 18, k.z0 + t), 0x5d6168));
+    }
+    // Deck lights: short lamp posts on alternate sides, each with a warm-white pool on the deck.
+    for (let t = 70, i = 0; t < len - 30; t += 170, i++) {
+      const sg = i % 2 ? 1 : -1;
+      const [lx, lz] = alongX ? [k.x0 + t, cz + sg * (wid / 2 - 14)] : [cx + sg * (wid / 2 - 14), k.z0 + t];
+      solid.push(tint(boxAt(4, 58, 4, lx, SKY_H + 29, lz), STEEL), tint(boxAt(14, 4, 14, lx, SKY_H + 60, lz), STEEL));
+      glow.push(tint(boxAt(11, 3, 11, lx, SKY_H + 57, lz), 0xfff4e6));
+      pool(lx - (alongX ? 0 : sg * 16), lz - (alongX ? sg * 16 : 0), 54, 0xfff4e6, SKY_H + 0.9);
     }
     // Light lines under the deck edges (the ring reads at night from the street).
     for (const [ex, ez, ew, ed] of [[cx, k.z0 + 1, w, 2], [cx, k.z1 - 1, w, 2], [k.x0 + 1, cz, 2, d], [k.x1 - 1, cz, 2, d]]) glow.push(tint(boxAt(ew, 2, ed, ex, SKY_H - 13, ez), 0x5dffc8));
@@ -555,20 +640,33 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
   }
   // Fascia bands over the avenue: SKY RING, lit, on both ring decks' outer faces.
   for (const [x, z, nz] of [[-2700, 1680, -1], [-2700, 1760, 1], [-2700, 2040, -1], [-2700, 2120, 1]] as const) {
-    lit.push(quad(360, 22, CELLS.ring, x, SKY_H - 11, z + nz * 0.8, 0, nz));
+    hero.push(quad(360, 22, CELLS.ring, x, SKY_H - 11, z + nz * 0.8, 0, nz));
   }
   for (const p of skyway) {
     if (p.kind === 'ramp') continue;
     const b = p as BoxPrim;
     if (b.y0 >= SKY_H) {
-      // Railing: a glass-like dark panel, a steel top rail and a mint light on it.
-      solid.push(tint(boxAt(b.w, b.y1 - b.y0 - 4, b.d, b.x, (b.y0 + b.y1) / 2 - 2, b.z), 0x2a3038));
-      solid.push(tint(boxAt(b.w + 1, 4, b.d + 1, b.x, b.y1 - 2, b.z), 0xb8bcc2));
-      glow.push(tint(boxAt(b.w > b.d ? b.w : 1.5, 1.2, b.d > b.w ? b.d : 1.5, b.x, b.y1 - 6, b.z), 0x5dffc8));
+      // Railing: steel posts every ≈ 1.4 m, a kick plate, frosted glass, a handrail with a light under it.
+      const lx = b.w > b.d, n2 = lx ? b.w : b.d, h = b.y1 - b.y0;
+      solid.push(tint(boxAt(b.w + 1, 7, b.d + 1, b.x, b.y0 + 3.5, b.z), 0x3a3d44));
+      glass.push(boxAt(lx ? b.w : 1.2, h - 13, lx ? 1.2 : b.d, b.x, b.y0 + 7 + (h - 13) / 2, b.z));
+      solid.push(tint(boxAt(b.w + 2, 4, b.d + 2, b.x, b.y1 - 2, b.z), 0xb8bcc2));
+      for (let t = 0; t <= n2 + 0.1; t += n2 / Math.max(1, Math.round(n2 / 36))) {
+        solid.push(tint(boxAt(3.4, h, 3.4, lx ? b.x - b.w / 2 + t : b.x, b.y0 + h / 2, lx ? b.z : b.z - b.d / 2 + t), 0x8b9098));
+      }
+      glow.push(tint(boxAt(lx ? b.w : 1.5, 1.2, lx ? 1.5 : b.d, b.x, b.y1 - 5, b.z), 0x5dffc8));
     } else if (b.y1 <= SKY_H - 12 + 0.1) {
+      // Column: a plinth, the shaft, and a cross-head under the deck (where the girders sit).
       solid.push(tint(new THREE.CylinderGeometry(10, 12, b.y1, 10).translate(b.x, b.y1 / 2, b.z), 0x5a5e66));
+      solid.push(tint(boxAt(30, 10, 30, b.x, 5, b.z), 0x77787a));
+      solid.push(tint(boxAt(34, 14, 34, b.x, b.y1 - 7, b.z), 0x6c7079));
       glow.push(tint(new THREE.CylinderGeometry(10.5, 10.5, 3, 10).translate(b.x, 30, b.z), 0xb46bff));
     }
+  }
+  // Junction plates on the deck over every column: a lighter square with a light ring (the nodes of the network).
+  for (const [x, z] of SKY_LEGS) {
+    ground.push(tint(flat(52, 52, x, SKY_H + 0.8, z), 0x9e998f));
+    glow.push(tint(new THREE.RingGeometry(18, 20.5, 24).rotateX(-Math.PI / 2).translate(x, SKY_H + 0.9, z), 0x5dffc8));
   }
   for (const p of skyway) {
     if (p.kind !== 'ramp') continue;
@@ -599,6 +697,18 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
       g.computeVertexNormals();
       solid.push(tint(g, 0x3a3e46));
     }
+    // The landing at the top: a steel portal with a lit header (the stair is an entrance to the deck).
+    {
+      const e = r.dir === 1 ? len / 2 : -len / 2;
+      const tx = r.axis === 'x' ? r.x + e : r.x, tz = r.axis === 'z' ? r.z + e : r.z;
+      for (const sg of [-1, 1]) {
+        const px = r.axis === 'z' ? tx + sg * (wid / 2 + 3) : tx, pz = r.axis === 'x' ? tz + sg * (wid / 2 + 3) : tz;
+        solid.push(tint(boxAt(7, 84, 7, px, SKY_H + 42, pz), 0x8b9098));
+      }
+      solid.push(tint(boxAt(r.axis === 'z' ? wid + 14 : 8, 12, r.axis === 'x' ? wid + 14 : 8, tx, SKY_H + 86, tz), 0x2a2c31));
+      glow.push(tint(boxAt(r.axis === 'z' ? wid + 4 : 9, 2, r.axis === 'x' ? wid + 4 : 9, tx, SKY_H + 79.5, tz), 0x5dffc8));
+      ground.push(tint(flat(r.axis === 'z' ? wid : 30, r.axis === 'x' ? wid : 30, tx + (r.axis === 'x' ? r.dir * 15 : 0), SKY_H + 0.75, tz + (r.axis === 'z' ? r.dir * 15 : 0)), 0x5e5a55));
+    }
     // A mint pool and a SKY RING sign at the foot.
     const footX = r.axis === 'x' ? r.x - r.dir * (len / 2 + 30) : r.x, footZ = r.axis === 'z' ? r.z - r.dir * (len / 2 + 30) : r.z;
     pool(footX, footZ, 70, 0x5dffc8, CURB + 0.6);
@@ -625,7 +735,7 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
       glow.push(tint(boxAt(2, G.top - 16, 2, G.x + 9.6, G.top / 2, z), 0xb46bff));
     }
     solid.push(tint(boxAt(10, s1 - s0 + 8, span - 18, G.x, (s0 + s1) / 2, zc), 0x111117));
-    for (const nx of [-1, 1]) lit.push(quad(span - 24, s1 - s0, CELLS.gate, G.x + nx * 5.6, (s0 + s1) / 2, zc, nx, 0));
+    for (const nx of [-1, 1]) hero.push(quad(span - 24, s1 - s0, CELLS.gate, G.x + nx * 5.6, (s0 + s1) / 2, zc, nx, 0));
     glow.push(tint(boxAt(12, 2.5, span - 14, G.x, s0 - 3, zc), 0x5dffc8));
     // Lanterns hung under the skywalk, inside the mouth.
     for (let k = 0; k < 5; k++) lanterns.push(M4(G.x + 50, 112, G.z0 + 14 + k * (span - 28) / 4));
@@ -639,15 +749,16 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
     const [cx0, cy0, cw] = CELLS.halo;
     const uv = disc.attributes.uv;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, (cx0 + uv.getX(i) * cw) / ATLAS_W, 1 - (cy0 + (1 - uv.getY(i)) * cw) / ATLAS_H);
-    lit.push(disc.rotateY(Math.PI).translate(H.x, H.y, H.z - 5));
+    halo.push(disc.rotateY(Math.PI).translate(H.x, H.y, H.z - 5));
     solid.push(tint(new THREE.CylinderGeometry(H.r + 6, H.r + 6, 10, 48).rotateX(Math.PI / 2).translate(H.x, H.y, H.z), 0x101016));
-    glow.push(tint(new THREE.TorusGeometry(H.r, 6, 8, 64).translate(H.x, H.y, H.z - 6), 0xff3fa4));
-    glow.push(tint(new THREE.TorusGeometry(H.r + 20, 2.5, 6, 64).translate(H.x, H.y, H.z - 6), 0x5dffc8));
+    // The rings are a step under the screen's own light (the screen is the landmark, not a lamp).
+    glow.push(tint(new THREE.TorusGeometry(H.r, 6, 8, 64).translate(H.x, H.y, H.z - 6), 0xc2358a));
+    glow.push(tint(new THREE.TorusGeometry(H.r + 20, 2.5, 6, 64).translate(H.x, H.y, H.z - 6), 0x46b892));
     for (const dx of [-105, 105]) {
       solid.push(tint(boxAt(16, H.y, 16, H.x + dx, H.y / 2, H.z + 4), STEEL));
       glow.push(tint(boxAt(17, 3, 17, H.x + dx, 24, H.z + 4), 0xb46bff));
     }
-    pool(H.x, H.z - 140, 190, 0xff3fa4, 0.6);
+    pool(H.x, H.z - 110, 130, 0xa02a6c, 0.6);
   }
 
   // ------------------------------------------------------------ 地下入口 (subway entrance)
@@ -674,7 +785,7 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
     pool(X.x, X.z, 230, 0xb46bff, 1.0);
   }
   // Station square: granite slabs in two tones inside the walkable edge, a ring of light studs round the point.
-  const GRANITE = [0x8f8b84, 0x9d9890, 0x85827c];
+  const GRANITE = [0x7a7670, 0x85817a, 0x716e69]; // mid-tone: the point's and the shops' light pools must not wash it out
   for (let x = -3290; x < -2890; x += 50) {
     for (let z = 1790; z < 2440; z += 50) {
       if (!insideLoop(x + 25, z + 25, 150)) continue;
@@ -770,22 +881,30 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
 
   // ------------------------------------------------------------ materials and meshes
   const tex = atlas();
-  const litMat = nearFade(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.8, roughness: 1 }), 30, 120);
+  const signMat = (i: number, tone = 0xffffff) => nearFade(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: tone, emissiveMap: tex, emissiveIntensity: i, roughness: 1 }), 30, 120);
+  // Three levels of sign light (see HERO_SCREENS): hero, support, background; HALO VISION just under hero.
+  const heroMat = signMat(0.85), litMat = signMat(0.62), backMat = signMat(0.34, 0xd6d0da), haloMat = signMat(0.5);
   const archMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.85, roughness: 1 });
   const solidMat = nearFade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.15 }), 30, 120);
   const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const winMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x9fb6c4, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false });
   const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const glowTex = radialGlowTexture();
   const poolMat = new THREE.MeshBasicMaterial({ map: glowTex, vertexColors: true, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   const holoMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
   NIGHT_GLOW.push({
     set: (k) => {
-      litMat.emissiveIntensity = 0.8 + 0.25 * k;
+      heroMat.emissiveIntensity = 0.85 + 0.2 * k;
+      litMat.emissiveIntensity = 0.62 + 0.16 * k;
+      backMat.emissiveIntensity = 0.34 + 0.1 * k;
+      haloMat.emissiveIntensity = 0.5 + 0.12 * k;
+      winMat.color.setScalar(0.55 + 0.4 * k);
       archMat.emissiveIntensity = 0.85 + 0.15 * k;
       glowMat.color.setScalar(0.75 + 0.25 * k);
       // Pools of shop and sign light: faint by day, carrying the street at night (never a wash).
       poolMat.opacity = 0.12 + 0.5 * k;
-      holoMat.opacity = 0.35 + 0.35 * k;
+      holoMat.opacity = 0.22 + 0.2 * k;
     },
   });
   let tris = 0, meshes = 0;
@@ -813,7 +932,12 @@ export function buildShibuya(scene: THREE.Scene): ShibuyaStats {
     glowAtNight(m, 0.45, 0.8);
     add(list, m, true);
   }
+  add(hero, heroMat, false);
   add(lit, litMat, false);
+  add(back, backMat, false);
+  add(halo, haloMat, false);
+  add(win, winMat, false, false);
+  add(glass, glassMat, false, false, 1);
   add(solid, solidMat, true);
   add(glow, glowMat, false, false);
   add(ground, groundMat, false);

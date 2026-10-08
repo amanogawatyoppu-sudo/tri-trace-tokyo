@@ -144,12 +144,12 @@ describe('Shibuya reforge: as drawn', () => {
       const scene = new THREE.Scene();
       const stats = buildShibuya(scene);
       expect(JSON.stringify(WORLD)).toBe(before);
-      // Merged per material plus a few instanced pieces and one line set (lantern wires).
-      expect(scene.children.length).toBeLessThanOrEqual(20);
+      // Merged per material (three sign levels, lit windows, deck glass) plus a few instanced pieces and one line set (lantern wires).
+      expect(scene.children.length).toBeLessThanOrEqual(24);
       expect(stats.triangles).toBeLessThan(90000);
       expect(stats.buildings).toBe(SHIBUYA_BUILT.buildings.length);
       expect(stats.bays).toBeGreaterThanOrEqual(30);
-      expect(stats.screens).toBeGreaterThanOrEqual(5);
+      expect(stats.screens).toBeGreaterThanOrEqual(4); // plus HALO VISION and the roof billboards
       expect(stats.lamps).toBeGreaterThanOrEqual(1);
     } finally { g.document = had; }
   });

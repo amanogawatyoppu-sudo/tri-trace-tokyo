@@ -5,6 +5,8 @@ import type { GameState } from '../sim/state';
 import { NATION_IDS } from '../config/nations';
 import { BOUNDS, BUILDINGS, GROUND_FLOOR, LIGHTS, WORLD, insideLoop } from '../config/map';
 import { POINT_R, SECTORS, sectorAt, sectorPoint } from '../sim/war';
+import { SHIBUYA_ZONES } from '../config/shibuya';
+import { nearFade } from './city';
 import { radialGlowTexture } from './textures';
 import { NIGHT_GLOW } from './nightGlow';
 import { kingLit } from '../sim/systems/tower';
@@ -181,9 +183,15 @@ export class WarView {
       // A point at the foot of a stair (東京タワー下): a tighter, dimmer glow so the steps stay readable (v10).
       const onStairs = WORLD.some((w) => w.kind === 'ramp' && Math.abs(p.x - w.x) < w.w / 2 + POINT_R / 2 && Math.abs(p.z - w.z) < w.d / 2 + POINT_R / 2);
       if (onStairs) poolMesh.scale.setScalar(0.55);
+      // 渋谷's point stands in the lit station square, among the district's own lights: a softer glow there too.
+      const inShibuya = SHIBUYA_ZONES.some((r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1);
+      if (inShibuya) {
+        banner.emissiveIntensity = 0.4;
+        nearFade(banner, 40, 160); // the panel dissolves when the chase camera comes up behind it
+      }
       g.add(beamMesh, coreMesh, poolMesh);
       scene.add(g);
-      this.points.push({ beam, core, pool, banner, canvas, tex, ring, gauge, flag, glare: onStairs ? 0.45 : 1, owner: '', shownProgress: 0 });
+      this.points.push({ beam, core, pool, banner, canvas, tex, ring, gauge, flag, glare: onStairs ? 0.45 : inShibuya ? 0.55 : 1, owner: '', shownProgress: 0 });
     });
   }
 
