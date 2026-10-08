@@ -9,6 +9,7 @@ import { buildDistricts } from './districts';
 import { buildShibuya } from './shibuya';
 import { buildShinjuku } from './shinjuku';
 import { buildAkihabara } from './akihabara';
+import { buildIkebukuro } from './ikebukuro';
 import { buildStairLights } from './stairLights';
 import { buildBases, buildLockPoints } from './objectives';
 import { NIGHT_GLOW } from './nightGlow';
@@ -607,6 +608,8 @@ export function buildScene(canvas: HTMLCanvasElement): SceneRefs {
   buildShinjuku(scene);
   // v10 MAP REFORGE phase 3: 秋葉原 ELECTRIC GRID.
   buildAkihabara(scene);
+  // MAP REFORGE: Ikebukuro ROOFTOP NETWORK (drawn by render/ikebukuro.ts).
+  buildIkebukuro(scene);
   buildStairLights(scene);
   const train = buildRailway(scene);
   // A fixed handful of lamp lights (never more or fewer: that would recompile every material).
