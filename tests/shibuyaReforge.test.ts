@@ -3,15 +3,20 @@ import { BUILDINGS, LIGHTS, POLES, SHIBUYA_BUILT, STREET_SEGS, WORLD, insideLoop
 import { MAZE, MAZE_MAP, SKY_DECKS, SKY_H, SKY_STAIRS } from '../src/config/shibuya';
 import { JAIL_SITES, BASE_SITES } from '../src/config/map';
 import { NATIONS } from '../src/config/nations';
+import { inAkihabara } from './helpers';
 import { planPath } from '../src/ai/nav';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
 
 /** v10 MAP REFORGE: Shibuya rebuilt as the Golden Sector (layout in config/shibuya.ts). */
 
-/** Everything outside the rebuilt area, hashed on the v9.2 map (before the reforge). */
-const OUTSIDE = { world: '2d071ac1', lights: 'bf52038', buildings: 'b32593bc', poles: 'd40b23fd', n: 688 };
-const outside = (p: { x: number; z: number }) => !(p.x > -3600 && p.x < -1894 && p.z > 1190 && p.z < 2700);
+/**
+ * Everything outside the rebuilt areas, hashed on the v9.2 map (before the reforge). Akihabara
+ * (phase 3: its zones and the arcade it reworks) is left out too; its own test hashes the rest.
+ */
+const OUTSIDE = { world: 'e5a49788', lights: 'bf52038', buildings: '38661293', poles: 'd40b23fd', n: 671 };
+const inShibuya = (p: { x: number; z: number }) => p.x > -3600 && p.x < -1894 && p.z > 1190 && p.z < 2700;
+const outside = (p: { x: number; z: number; group?: string }) => !inShibuya(p) && !inAkihabara(p);
 /** FNV-1a over the JSON (enough to notice any change). */
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);
@@ -38,7 +43,7 @@ describe('Shibuya reforge: the rest of Tokyo is untouched', () => {
       const dx = Math.max(Math.abs(p.x - w.x) - w.w / 2, 0), dz = Math.max(Math.abs(p.z - w.z) - w.d / 2, 0);
       expect(Math.hypot(dx, dz), `${w.mat} ${w.group ?? ''} at ${w.x},${w.z}`).toBeGreaterThan(150);
     }
-    for (const s of [...Object.values(BASE_SITES), ...Object.values(JAIL_SITES)]) expect(outside(s)).toBe(true);
+    for (const s of [...Object.values(BASE_SITES), ...Object.values(JAIL_SITES)]) expect(inShibuya(s)).toBe(false);
   });
 
   it('runs the avenue unbroken through the crossing (MAIN STREET)', () => {

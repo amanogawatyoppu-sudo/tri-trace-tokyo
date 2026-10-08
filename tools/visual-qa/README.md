@@ -29,3 +29,10 @@ compare draw calls, triangles and memory instead, and measure frame time on a de
 - `game2.cjs` — the player in the normal camera: idle/run/sprint/turn/stop, plus on-screen height
 - `tour.cjs` — renderer.info at 10 fixed spots (`BASE=… Q=…`)
 - `mk92.py` — builds the sheets in `docs/review-v9.2/`
+
+## MAP REFORGE phase 3（秋葉原）
+- `aki-spots.cjs` — fixed spots, day/sunset/night (`[name,x,z,fx,fz,y,tilt,zoom,time]`; zoom/tilt reset per spot via `__sangoku.zoom/tilt`)
+- `aki-run30.cjs` — 30 s run with real key input, 12 frames evenly in game time
+- `aki-perf.cjs` — draw calls / triangles / frame time / memory at 6 spots, day and night
+- `aki-dump.qa.ts` — `OUT=x.json npx vitest run --config tools/visual-qa/vitest.qa.ts`: prims + walkability flood fill from LUNA's base
+- `aki-plan.py`, `aki-sheets.py` — plan and review sheets (`AKI=<dir>`)

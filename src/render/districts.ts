@@ -5,6 +5,7 @@ import { SECTORS, sectorAt } from '../sim/war';
 import { NIGHT_GLOW } from './nightGlow';
 import { DISTRICT_CODES } from '../config/terminology';
 import { SHIBUYA_LIGHTS } from './shibuya';
+import { AKIBA_LIGHTS } from './akihabara';
 
 /**
  * District identity (v9.0, visual only): each of the nine sectors dresses its buildings
@@ -35,7 +36,8 @@ export const DISTRICT_LOOKS: readonly DistrictLook[] = [
   { palette: [0x7dffb0, 0xfff1c0, 0x45c8ff], signs: 1.2, shape: 'band', crown: 0.95, masts: 0.35 }, // 池袋
   { palette: [0xffc27a, 0xfff0d6], signs: 0.35, shape: 'lantern', crown: 0.05, masts: 0 }, // 文京
   { palette: [0xb9ff7a, 0xffd59a], signs: 0.45, shape: 'lantern', crown: 0.1, masts: 0 }, // 上野
-  { palette: [0x39f0ff, 0xffe23a, 0x6bff6b, 0xff4fd8], signs: 3.0, shape: 'screen', crown: 0.3, masts: 0.15 }, // 秋葉原
+  // 秋葉原 (v10 ELECTRIC GRID): white, violet-leaning electric blue, green, a little red — no LUNA sky blue or STAR yellow.
+  { palette: [...AKIBA_LIGHTS], signs: 3.0, shape: 'screen', crown: 0.3, masts: 0.15 }, // 秋葉原
   { palette: [0xffe2a0, 0xffffff], signs: 0.5, shape: 'band', crown: 1, masts: 0.4 }, // 中央
   { palette: [0xff3b30, 0xffa060, 0xffffff], signs: 1.0, shape: 'band', crown: 0.6, masts: 0.2 }, // 東京タワー
   { palette: [0x9ff3ff, 0xffffff, 0x5a8bff], signs: 0.9, shape: 'band', crown: 0.9, masts: 0.3 }, // 品川
