@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import type { InstancedMesh } from 'three';
 import { Vector3 } from 'three';
 import './style.css';
@@ -526,6 +527,26 @@ function exposeDebug(state: GameState, cam: CameraController, tutorial: Tutorial
       const proj = (y: number) => { const v = new Vector3(p.x, p.y + y, p.z).project(c); return { x: (v.x + 1) / 2 * el.clientWidth, y: (1 - v.y) / 2 * el.clientHeight }; };
       const a = proj(0), b = proj(47);
       return { px: Math.round(a.y - b.y), viewH: el.clientHeight, share: +((a.y - b.y) / el.clientHeight).toFixed(3), feetY: Math.round(a.y) };
+    },
+    /** Meshes in the camera's view, largest first: what a frame draws (count, triangles, bounds), for performance passes. */
+    breakdown: (top = 30) => {
+      const cam = refs.camera, fr = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+      const rows: { name: string; mat: string; inst: number; tris: number; cast: boolean; c: number[]; r: number }[] = [];
+      refs.scene.traverseVisible((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.geometry) return;
+        const g = m.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
+        const bs = (m as THREE.InstancedMesh).isInstancedMesh ? ((m as THREE.InstancedMesh).boundingSphere ?? g.boundingSphere!).clone() : g.boundingSphere!.clone();
+        bs.applyMatrix4(m.matrixWorld);
+        if (!m.frustumCulled || fr.intersectsSphere(bs)) {
+          const inst = (m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).count : 1;
+          const tri = (g.index ? g.index.count : g.attributes.position.count) / 3 * inst;
+          const mt = Array.isArray(m.material) ? m.material[0] : m.material;
+          rows.push({ name: m.name || m.parent?.name || '', mat: mt.type + (('map' in mt && (mt as THREE.MeshStandardMaterial).map) ? '+map' : '') + ':' + (('color' in mt) ? (mt as THREE.MeshStandardMaterial).color.getHexString() : ''), inst, tris: Math.round(tri), cast: m.castShadow, c: [Math.round(bs.center.x), Math.round(bs.center.y), Math.round(bs.center.z)], r: Math.round(bs.radius) });
+        }
+      });
+      rows.sort((a, b) => b.tris - a.tris);
+      return { n: rows.length, tris: rows.reduce((s, r) => s + r.tris, 0), top: rows.slice(0, top) };
     },
     renderInfo: () => ({ calls: refs.renderer.info.render.calls, triangles: refs.renderer.info.render.triangles, geometries: refs.renderer.info.memory.geometries, textures: refs.renderer.info.memory.textures }),
   };

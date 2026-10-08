@@ -6,6 +6,7 @@ import { NATION_IDS } from '../config/nations';
 import { BOUNDS, BUILDINGS, GROUND_FLOOR, LIGHTS, WORLD, insideLoop } from '../config/map';
 import { POINT_R, SECTORS, sectorAt, sectorPoint } from '../sim/war';
 import { SHIBUYA_ZONES } from '../config/shibuya';
+import { DATA_JUNCTION } from '../config/akihabara';
 import { nearFade } from './city';
 import { radialGlowTexture } from './textures';
 import { NIGHT_GLOW } from './nightGlow';
@@ -189,9 +190,15 @@ export class WarView {
         banner.emissiveIntensity = 0.4;
         nearFade(banner, 40, 160); // the panel dissolves when the chase camera comes up behind it
       }
+      // 秋葉原's point (DATA JUNCTION): the square's LED boards and floor circuits carry the light, so its own glow steps back.
+      const J = DATA_JUNCTION, inAkiba = p.x > J.x0 && p.x < J.x1 && p.z > J.z0 - 60 && p.z < J.z1 + 60;
+      if (inAkiba) {
+        banner.emissiveIntensity = 0.45;
+        nearFade(banner, 40, 160);
+      }
       g.add(beamMesh, coreMesh, poolMesh);
       scene.add(g);
-      this.points.push({ beam, core, pool, banner, canvas, tex, ring, gauge, flag, glare: onStairs ? 0.45 : inShibuya ? 0.55 : 1, owner: '', shownProgress: 0 });
+      this.points.push({ beam, core, pool, banner, canvas, tex, ring, gauge, flag, glare: onStairs ? 0.45 : inShibuya ? 0.55 : inAkiba ? 0.45 : 1, owner: '', shownProgress: 0 });
     });
   }
 

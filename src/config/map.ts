@@ -8,6 +8,11 @@ import {
   SHINJUKU_STAIRS, SHINJUKU_ZONES,
 } from './shinjuku';
 import type { ShinjukuBuilding } from './shinjuku';
+import {
+  AKIBA_BUILDINGS, AKIBA_LAMPS, AKIBA_POLES, AKIBA_VENDING, AKIBA_WIRES, AKIBA_ZONES, ARCADE_SOUTH_DOOR, GATE_H, GRID_GATE, GRID_TOWER,
+  JUNCTION_BOARDS, MAIN_STREET, POWER_NODE,
+} from './akihabara';
+import type { AkibaBuilding } from './akihabara';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -637,8 +642,8 @@ export interface Building {
   seed: number;
   /** Beyond the tracks: scenery only. */
   outside: boolean;
-  /** Drawn by its district's own renderer (v10: the rebuilt centre of Shibuya), not the generic city. */
-  custom?: 'shibuya' | 'shinjuku';
+  /** Drawn by its district's own renderer (v10: the rebuilt centres of Shibuya, Shinjuku and Akihabara), not the generic city. */
+  custom?: 'shibuya' | 'shinjuku' | 'akihabara';
 }
 export interface StreetSeg { x: number; z: number; w: number; d: number; axis: 'x' | 'z'; kind: StreetKind }
 export interface Block { x0: number; z0: number; x1: number; z1: number; sides: Record<Side, StreetKind> }
@@ -1178,6 +1183,104 @@ export const SHINJUKU_BUILT: { buildings: (ShinjukuBuilding & { h: number })[] }
   // Street trees on the avenue's west pavement and round the square.
   for (const [x, z] of [[-3360, -1300], [-3360, -1100]]) tree(x, z, 250);
   for (const l of SHINJUKU_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
+}
+
+// ---------------------------------------------------------------- 秋葉原 ELECTRIC GRID (v10 MAP REFORGE phase 3)
+/**
+ * The north bank of the Kanda at Akihabara is rebuilt by hand (config/akihabara.ts) after the
+ * generated city, the same way as Shibuya: the generated pieces in the area are taken out and
+ * the electric town put in — MAIN ELECTRIC STREET on 聖橋's axis, the COMPONENT ALLEY lanes,
+ * the SERVICE CUT back lane and passages, GRID GATE, GRID TOWER, DATA JUNCTION and POWER NODE.
+ * The existing arcade (CIRCUIT ARCADE) keeps its place and its east and west doors and gets a
+ * south door into the lanes.
+ */
+export const AKIBA_BUILT: { buildings: (AkibaBuilding & { h: number })[] } = { buildings: [] };
+{
+  const inZone = (x: number, z: number) => AKIBA_ZONES.some((r) => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1);
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (inZone(p.x, p.z) && GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car')) prims.splice(i, 1);
+  }
+  const keep = <T extends Point>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  keep(BUILDINGS, (b) => b.outside || !inZone(b.x, b.z));
+  keep(PARKINGS, (k) => !inZone(k.x, k.z));
+  keep(LIGHTS, (l) => !inZone(l.x, l.z));
+  keep(SIGNALS, (l) => !inZone(l.x, l.z));
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (!inZone(p.x, p.z)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+
+  // CIRCUIT ARCADE: a south door in the arcade's south wall, onto the lanes.
+  {
+    const i = prims.findIndex((p) => p.group === 'arcade' && p.kind === 'box' && p.y0 === 0 && p.d === 14 && p.z > ARCADE.z);
+    const w = prims[i] as BoxPrim;
+    const a0 = w.x - w.w / 2, a1 = w.x + w.w / 2, g0 = ARCADE_SOUTH_DOOR.x - ARCADE_SOUTH_DOOR.width / 2, g1 = ARCADE_SOUTH_DOOR.x + ARCADE_SOUTH_DOOR.width / 2;
+    prims.splice(i, 1, { ...w, x: (a0 + g0) / 2, w: g0 - a0 }, { ...w, x: (g1 + a1) / 2, w: a1 - g1 });
+  }
+
+  // MAIN ELECTRIC STREET: a two-lane carriageway between raised pavements.
+  const M = MAIN_STREET;
+  STREET_SEGS.push({ x: (M.road0 + M.road1) / 2, z: (M.z0 + M.z1) / 2, w: M.road1 - M.road0, d: M.z1 - M.z0, axis: 'z', kind: 'street' });
+  const pave = (x0: number, z0: number, x1: number, z1: number, sides: Block['sides']) => {
+    box((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, CURB, 'sidewalk');
+    BLOCKS.push({ x0, z0, x1, z1, sides });
+  };
+  // The west pavement runs into the lane block (one raised block); the east pavement stops at the bridge.
+  pave(1702, M.z0, M.road0, -2447, { n: 'alley', s: 'alley', w: 'alley', e: 'street' });
+  pave(M.road1, M.z0, M.x1, M.z1, { n: 'alley', s: 'alley', w: 'street', e: 'alley' });
+
+  // Buildings (one collision box each; a passage building stands on its upper storeys).
+  const rnd = prng(1515);
+  for (const b of AKIBA_BUILDINGS) {
+    const h = floorsToHeight(b.floors), x = (b.x0 + b.x1) / 2, z = (b.z0 + b.z1) / 2, w = b.x1 - b.x0, d = b.z1 - b.z0;
+    box(x, z, w, d, h, 'bldg', { noFloor: true, y0: b.under ? GROUND_FLOOR : 0 });
+    BUILDINGS.push({ x, z, w, d, h, type: b.floors <= 3 ? 'shop' : 'mixed', floors: b.floors, district: 'commercial', front: b.fronts[0], seed: Math.floor(rnd() * 1e9), outside: false, custom: 'akihabara' });
+    AKIBA_BUILT.buildings.push({ ...b, h });
+  }
+
+  // GRID GATE: deck, railings, legs and the two stairs.
+  {
+    const G = GRID_GATE, D = G.deck, id = 'akibaGate', RAIL = 6, RAIL_H = 32;
+    slab((D.x0 + D.x1) / 2, (D.z0 + D.z1) / 2, D.x1 - D.x0, D.z1 - D.z0, GATE_H, 'metal', id);
+    box((D.x0 + D.x1) / 2, D.z0 + RAIL / 2, D.x1 - D.x0, RAIL, GATE_H + RAIL_H, 'metal', { y0: GATE_H, group: id });
+    box((2140 + D.x1) / 2, D.z1 - RAIL / 2, D.x1 - 2140, RAIL, GATE_H + RAIL_H, 'metal', { y0: GATE_H, group: id });
+    box(D.x0 + RAIL / 2, (D.z0 + D.z1) / 2, RAIL, D.z1 - D.z0, GATE_H + RAIL_H, 'metal', { y0: GATE_H, group: id });
+    for (const [x, z] of G.legs) box(x, z, 12, 12, GATE_H - SLAB, 'metal', { group: id });
+    for (const s of G.stairs) {
+      ramp((s.x0 + s.x1) / 2, (s.z0 + s.z1) / 2, s.x1 - s.x0, s.z1 - s.z0, s.axis, s.dir, s.id === 'gateW' ? CURB : 0, GATE_H, 'stairs', 'metal', id);
+    }
+  }
+  // GRID TOWER, the DATA JUNCTION boards and POWER NODE (drawn by render/akihabara.ts).
+  box(GRID_TOWER.x, GRID_TOWER.z, GRID_TOWER.half * 2, GRID_TOWER.half * 2, GRID_TOWER.h, 'steel', { group: 'akibaTower', noFloor: true });
+  for (const k of JUNCTION_BOARDS) box(k.x, k.z, k.w, k.d, k.h, 'metal', { group: 'akibaBoard', noFloor: true });
+  {
+    const P = POWER_NODE;
+    box((P.x0 + P.x1) / 2, (P.z0 + P.z1) / 2, P.x1 - P.x0, P.z1 - P.z0, P.h, 'metal', { group: 'akibaPower', noFloor: true });
+  }
+
+  // Street furniture: poles and wires, vending machines, lamps.
+  const p0 = POLES.length;
+  for (const [x, z] of AKIBA_POLES) {
+    box(x, z, 10, 10, 260, 'pole', { noFloor: true });
+    POLES.push({ x, z });
+  }
+  for (const [a, b] of AKIBA_WIRES) WIRES.push([p0 + a, p0 + b]);
+  for (const [x, z, side] of AKIBA_VENDING) {
+    const n = side === 'n' || side === 's';
+    box(x, z, n ? 54 : 20, n ? 20 : 54, 48, 'vending', { noFloor: true, group: side });
+  }
+  for (const l of AKIBA_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
 }
 
 export const WORLD: readonly Prim[] = prims;

@@ -8,6 +8,7 @@ import { buildCity } from './city';
 import { buildDistricts } from './districts';
 import { buildShibuya } from './shibuya';
 import { buildShinjuku } from './shinjuku';
+import { buildAkihabara } from './akihabara';
 import { buildStairLights } from './stairLights';
 import { buildBases, buildLockPoints } from './objectives';
 import { NIGHT_GLOW } from './nightGlow';
@@ -307,6 +308,8 @@ function buildWorld(scene: THREE.Scene): void {
     if (p.group === 'skyway' || p.group === 'shibuya') continue;
     // Shinjuku's decks, stairs, podium roofs and gate posts are drawn by render/shinjuku.ts.
     if (p.group === 'sjdeck' || p.group === 'shinjuku') continue;
+    // Akihabara's arcade, footbridge, tower, LED boards and switchgear are drawn by render/akihabara.ts.
+    if (p.group === 'arcade' || p.group === 'akibaGate' || p.group === 'akibaTower' || p.group === 'akibaPower' || p.group === 'akibaBoard') continue;
     if (p.kind === 'ramp') { add(matKey(p), rampGeometry(p)); continue; }
     const b = p as BoxPrim;
     const h = b.y1 - b.y0, key = matKey(b);
@@ -602,6 +605,8 @@ export function buildScene(canvas: HTMLCanvasElement): SceneRefs {
   // v10 MAP REFORGE: the rebuilt centre of Shibuya (the Golden Sector).
   buildShibuya(scene);
   buildShinjuku(scene);
+  // v10 MAP REFORGE phase 3: 秋葉原 ELECTRIC GRID.
+  buildAkihabara(scene);
   buildStairLights(scene);
   const train = buildRailway(scene);
   // A fixed handful of lamp lights (never more or fewer: that would recompile every material).
