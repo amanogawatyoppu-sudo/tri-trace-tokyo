@@ -24,15 +24,17 @@ import type { FacadeKind } from './textures';
  *
  * Colours: white, black, an electric blue pushed towards violet (clear of LUNA's blue), green,
  * and a little red. Light pools on the ground stay white or green, so the faction colours of
- * the people in a lane always stand out. Small repeated pieces are instanced; everything else
- * is merged per material, with one texture atlas for every sign.
+ * the people in a lane always stand out. Everything is merged per material (all the lights in one
+ * unlit mesh, small props in one that casts no shadow), with one texture atlas for every sign.
  */
 
 /** Akihabara's light colours: white, electric violet-blue, green, red (never a faction hue; see tests). */
 export const AKIBA_LIGHTS = [0xf2f6ff, 0x5a4bff, 0x3dff8a, 0xff2d55] as const;
 const WHITE = AKIBA_LIGHTS[0], BLUE = AKIBA_LIGHTS[1], GREEN = AKIBA_LIGHTS[2], RED = AKIBA_LIGHTS[3];
 
-const ATLAS_W = 1024, ATLAS_H = 2048;
+// Cells are laid out on a 1024×2048 grid, drawn into a 1024×1024 texture (half the height: the signs are wide, so
+// they keep their horizontal detail; 5.6 MB of texture memory instead of 11.2).
+const ATLAS_W = 1024, ATLAS_H = 2048, ATLAS_PX_H = 1024;
 type Cell = [number, number, number, number];
 const CELLS = {
   window: (i: number): Cell => [(i % 4) * 256, Math.floor(i / 4) * 192, 256, 192],
@@ -62,8 +64,9 @@ const css = (c: number, a = 1) => `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c
 function atlas(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = ATLAS_W;
-  c.height = ATLAS_H;
+  c.height = ATLAS_PX_H;
   const g = c.getContext('2d')!;
+  g.scale(1, ATLAS_PX_H / ATLAS_H);
   const rnd = prng(3141);
   const text = (s: string, x: number, y: number, size: number, color: string, align: CanvasTextAlign = 'center', weight = '800') => {
     g.fillStyle = color;
@@ -291,6 +294,69 @@ function atlas(): THREE.CanvasTexture {
   return tex;
 }
 
+/** The swatch cell's centre (plain white): lights without their own picture sample it. */
+const SWATCH_UV: [number, number] = [(CELLS.swatch[0] + 8) / ATLAS_W, 1 - (CELLS.swatch[1] + 8) / ATLAS_H];
+
+/**
+ * One kind of light for the shared light mesh: its day brightness `base` (times its own colour, if it has one) in the
+ * vertex colour, and how much it adds by night (`nightAdd`, at full night) as a per-vertex gain.
+ */
+function lightsOf(list: THREE.BufferGeometry[], base: number, nightAdd: number, tone = 0xffffff): THREE.BufferGeometry[] {
+  const t = new THREE.Color(tone).multiplyScalar(base);
+  return list.map((g0) => {
+    const g = g0.index ? g0.toNonIndexed() : g0, n = g.attributes.position.count;
+    if (!g.attributes.uv) { const uv = new Float32Array(n * 2); for (let i = 0; i < n; i++) uv.set(SWATCH_UV, i * 2); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); }
+    const c = g.attributes.color as THREE.BufferAttribute | undefined, col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) col.set(c ? [c.getX(i) * t.r, c.getY(i) * t.g, c.getZ(i) * t.b] : [t.r, t.g, t.b], i * 3);
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('aGain', new THREE.BufferAttribute(new Float32Array(n).fill(nightAdd / base), 1));
+    return g;
+  });
+}
+
+/** The unlit light material: atlas × vertex colour × (1 + night × gain), dissolving near the camera like the signs. */
+function lightMaterial(tex: THREE.Texture): THREE.MeshBasicMaterial {
+  const m = basicNearFade(new THREE.MeshBasicMaterial({ map: tex, vertexColors: true }), 30, 120);
+  const night = { value: 0 };
+  m.userData.night = night;
+  const fade = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    fade(sh, r);
+    sh.uniforms.uNight = night;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aGain;\nvarying float vGain;')
+      .replace('#include <color_vertex>', '#include <color_vertex>\nvGain = aGain;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uNight;\nvarying float vGain;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= 1.0 + uNight * vGain;');
+  };
+  m.customProgramCacheKey = () => 'akiba-light';
+  return m;
+}
+
+/**
+ * Drops faces nobody sees: the undersides of pieces standing on the ground or the pavement, and (`flatOnly`) all
+ * but the top of a light line laid in the paving (its sides are under a unit high).
+ */
+function hideFaces(g: THREE.BufferGeometry, flatOnly = false): THREE.BufferGeometry {
+  const p = g.attributes.position, n = g.attributes.normal, keep: number[] = [];
+  if (!n) return g;
+  for (let t = 0; t < p.count; t += 3) {
+    const top = Math.max(p.getY(t), p.getY(t + 1), p.getY(t + 2)), ny = n.getY(t);
+    if (top < CURB + 1.5 && ny < -0.9) continue;
+    if (flatOnly && top < 1.5 && ny < 0.9) continue;
+    keep.push(t);
+  }
+  if (keep.length * 3 === p.count) return g;
+  const out = new THREE.BufferGeometry();
+  for (const [k, a] of Object.entries(g.attributes)) {
+    const src = a as THREE.BufferAttribute, w = src.itemSize, arr = new Float32Array(keep.length * 3 * w);
+    keep.forEach((t, i) => arr.set((src.array as Float32Array).subarray(t * w, (t + 3) * w), i * 3 * w));
+    out.setAttribute(k, new THREE.BufferAttribute(arr, w));
+  }
+  return out;
+}
+
 /** A flat textured quad facing (nx, 0, nz) (or up), mapped to an atlas cell. */
 function quad(w: number, h: number, cell: Cell, x: number, y: number, z: number, nx: number, nz: number, up = false): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(w, h);
@@ -339,6 +405,10 @@ const flat = (w: number, d: number, x: number, y: number, z: number, ang = 0) =>
 function bar(ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): THREE.BufferGeometry {
   const a = new THREE.Vector3(ax, ay, az), b = new THREE.Vector3(bx, by, bz), len = a.distanceTo(b);
   const g = new THREE.BoxGeometry(t, len, t);
+  // No end caps (a cap on a thin bar is never seen): keep the four long sides.
+  const idx = Array.from(g.index!.array);
+  g.setIndex([...idx.slice(0, 12), ...idx.slice(24)]);
+  g.clearGroups();
   g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()));
   return g.translate((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
 }
@@ -358,6 +428,11 @@ const along = (f: Face, s: number, out: number): [number, number] => {
   return [f.ax + tx * s + f.nx * out, f.az + tz * s + f.nz * out];
 };
 const SIDES: AkibaSide[] = ['n', 's', 'e', 'w'];
+/** Whether a front looks onto MAIN ELECTRIC STREET (otherwise it fronts a lane). */
+const onStreet = (f: Face) => {
+  const [px, pz] = along(f, f.len / 2, 40);
+  return px > MAIN_STREET.x0 && px < MAIN_STREET.x1 && pz > MAIN_STREET.z0 - 40 && pz < MAIN_STREET.z1 + 40;
+};
 
 /** Lit windows on the upper storeys: cool and warm whites, a few green-lit rooms (no faction hue). */
 const WINDOW_LIGHTS = [0xf2f6ff, 0xfff1dc, 0xdfe6ff, 0xd8ffe8];
@@ -369,7 +444,11 @@ const SKIN: Record<AkibaBuilding['skin'], { tex: FacadeKind; tint: number }> = {
   dark: { tex: 'tileB', tint: 0x6a6c74 }, // a dark panel front, not black glass (a black slab reads as a blank wall)
 };
 
-export interface AkibaStats { buildings: number; bays: number; blades: number; meshes: number; instanced: number; triangles: number; cables: number }
+export interface AkibaStats {
+  buildings: number; bays: number; blades: number; meshes: number; props: number; triangles: number; cables: number;
+  /** COMPONENT ALLEY's small signs and text: how many the old rules made, how many are left, how many of those are dimmed. */
+  alleyInfo: { before: number; kept: number; dimmed: number };
+}
 
 /** Builds the rebuilt centre of Akihabara into the scene. */
 export function buildAkihabara(scene: THREE.Scene): AkibaStats {
@@ -377,6 +456,9 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
   const GF = GROUND_FLOOR;
   // Merge buckets.
   const hero: THREE.BufferGeometry[] = [], lit: THREE.BufferGeometry[] = [], back: THREE.BufferGeometry[] = [], win: THREE.BufferGeometry[] = [];
+  // dim: shop fronts in the lanes, one step under `lit`; bright: GRID TOWER's vertical light lines.
+  const dim: THREE.BufferGeometry[] = [], bright: THREE.BufferGeometry[] = [];
+  const alleyInfo = { before: 0, kept: 0, dimmed: 0 };
   const solid: THREE.BufferGeometry[] = [], glow: THREE.BufferGeometry[] = [], ground: THREE.BufferGeometry[] = [], pools: THREE.BufferGeometry[] = [], traces: THREE.BufferGeometry[] = [];
   const skins: Record<string, THREE.BufferGeometry[]> = {};
   // Instanced pieces.
@@ -452,18 +534,25 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
         const [qx, qz] = along(f, f.len / 2, 60);
         pool(qx, qz, 70, GREEN, CURB + 0.7);
       } else if (front) {
+        // A front on a lane (COMPONENT ALLEY, the parts lane) keeps every shop and name, but about a quarter of its
+        // small signs and text go, and its shop windows sit one step darker: in a lane the people come first.
+        const alley = !onStreet(f);
         // Street level: narrow bays (≈ 3.5 m) — show window or half-shutter, name band, an LED ticker over some.
         const n = Math.max(1, Math.round((f.len - 10) / 92)), bw = (f.len - 10) / n;
         for (let k = 0; k < n; k++) {
           const s = 5 + bw * (k + 0.5);
           const [wx, wz] = along(f, s, 1.6);
           const shut = br() < 0.15;
-          lit.push(quad(bw - 8, GF - 30, shut ? CELLS.shutter : CELLS.window(wi++ % 8), wx, (GF - 30) / 2 + 2, wz, f.nx, f.nz));
+          (alley ? dim : lit).push(quad(bw - 8, GF - 30, shut ? CELLS.shutter : CELLS.window(wi++ % 8), wx, (GF - 30) / 2 + 2, wz, f.nx, f.nz));
           const [lx, lz] = along(f, s, 2.9);
           lit.push(quad(bw - 6, 20, CELLS.name(ni++ % NAMES.length), lx, GF - 14, lz, f.nx, f.nz));
+          if (alley) { alleyInfo.before += 2; alleyInfo.kept += 2; alleyInfo.dimmed++; }
           const [bx2, bz2] = along(f, s, 1.2);
           solid.push(tint(boxAt(bw - 2, 26, 3, bx2, GF - 14, bz2, ang), FRAME));
-          if (br() < 0.55) {
+          const rt = br();
+          if (alley) alleyInfo.before += rt < 0.55 ? 1 : 0;
+          if (rt < (alley ? 0.3 : 0.55)) {
+            if (alley) alleyInfo.kept++;
             const [tx2, tz2] = along(f, s, 3.4);
             back.push(quad(bw - 14, 10, CELLS.ticker(ti++ % 4), tx2, GF + 8, tz2, f.nx, f.nz));
           }
@@ -477,9 +566,13 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
           } else if (r < 0.5) {
             for (let q = 0; q < 4; q++) { const [gx, gz] = along(f, s - 30 + q * 20, 11); gacha.push(M4(gx, CURB, gz, ang)); }
           } else if (r < 0.7) {
-            const [px, pz] = along(f, s, 18);
-            solid.push(tint(boxAt(3, 46, 3, px, CURB + 23, pz), FRAME));
-            lit.push(quad(30, 30, CELLS.card(ci++ % 16), px + f.nx * 2, CURB + 58, pz + f.nz * 2, f.nx, f.nz));
+            // A price card on a stand (only on the street: in a lane it stands right where the people walk).
+            if (alley) alleyInfo.before++;
+            else {
+              const [px, pz] = along(f, s, 18);
+              solid.push(tint(boxAt(3, 46, 3, px, CURB + 23, pz), FRAME));
+              lit.push(quad(30, 30, CELLS.card(ci++ % 16), px + f.nx * 2, CURB + 58, pz + f.nz * 2, f.nx, f.nz));
+            }
           }
           // Shop light on the pavement: white or green, never a wash.
           const [px, pz] = along(f, s, 36);
@@ -489,8 +582,10 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
         for (let k = 0; k <= n; k++) {
           const [px, pz] = along(f, 5 + bw * k, 2);
           solid.push(tint(boxAt(6, GF, 5, px, GF / 2, pz, ang), FRAME));
-          // Posters on the pillars.
-          if (k > 0 && k < n && br() < 0.6) { const [qx, qz] = along(f, 5 + bw * k, 4.8); back.push(quad(16, 22, CELLS.card(ci++ % 16), qx, 60, qz, f.nx, f.nz)); }
+          // Posters on the pillars (fewer in the lanes: they hang at the height of a body).
+          const rp = k > 0 && k < n ? br() : 1;
+          if (alley && rp < 0.6) alleyInfo.before++;
+          if (rp < (alley ? 0.3 : 0.6)) { const [qx, qz] = along(f, 5 + bw * k, 4.8); back.push(quad(16, 22, CELLS.card(ci++ % 16), qx, 60, qz, f.nx, f.nz)); if (alley) alleyInfo.kept++; }
         }
         const [cx, cz] = along(f, f.len / 2, 4);
         solid.push(tint(boxAt(f.len + 4, 6, 8, cx, GF + 2, cz, ang), 0x26282d));
@@ -499,10 +594,20 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
           for (let k = 2; k <= b.floors; k++) {
             const s = f.len > 100 ? f.len * (0.28 + 0.44 * (k % 2)) : f.len / 2;
             const [qx, qz] = along(f, s, 1.4);
-            back.push(quad(Math.min(84, f.len - 24), 11, CELLS.floor(fi++ % FLOORS.length), qx, GF + (k - 2) * STOREY + STOREY - 13, qz, f.nx, f.nz));
-            if (br() < 0.5) {
+            // In a lane, a tenant sign on every other storey only.
+            if (alley) alleyInfo.before++;
+            if (!alley || k % 2 === 0) {
+              back.push(quad(Math.min(84, f.len - 24), 11, CELLS.floor(fi++ % FLOORS.length), qx, GF + (k - 2) * STOREY + STOREY - 13, qz, f.nx, f.nz));
+              if (alley) alleyInfo.kept++;
+            }
+            const rw = br();
+            if (rw < 0.5) {
               const [px, pz] = along(f, 14 + br() * (f.len - 28), 1.6);
-              back.push(quad(26, 26, CELLS.card(ci++ % 16), px, GF + (k - 2) * STOREY + STOREY / 2 + 6, pz, f.nx, f.nz));
+              if (alley) alleyInfo.before++;
+              if (!alley || rw < 0.25) {
+                back.push(quad(26, 26, CELLS.card(ci++ % 16), px, GF + (k - 2) * STOREY + STOREY / 2 + 6, pz, f.nx, f.nz));
+                if (alley) alleyInfo.kept++;
+              }
             }
           }
         }
@@ -514,6 +619,7 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
             if (hh < 70) continue;
             const [sx, sz] = along(f, s, 18);
             const cell = CELLS.blade(bi++ % 16);
+            if (alley) { alleyInfo.before++; alleyInfo.kept++; }
             back.push(quad(24, hh, cell, sx + tx * 0.6, b0 + hh / 2, sz + tz * 0.6, tx, tz));
             back.push(quad(24, hh, cell, sx - tx * 0.6, b0 + hh / 2, sz - tz * 0.6, -tx, -tz));
             // A thin light line on the sign's outer edge (blue or green).
@@ -685,8 +791,11 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
         solid.push(tint(bar(T.x + bx * ra, y, T.z + bz * ra, T.x + ax * rb, y1, T.z + az * rb, 1.6), col));
       }
     }
-    // Light lines up the legs (violet-blue) and a green ring at the cable ring.
-    for (const [sx, sz] of legs) glow.push(tint(bar(T.x + sx * (r0 + 1), 30, T.z + sz * (r0 + 1), T.x + sx * (r1 + 1), h - 10, T.z + sz * (r1 + 1), 1.4), BLUE));
+    // Light lines up the legs (violet-blue, a little brighter than the town's signs so the mast's line upward
+    // carries over them) and a green ring at the cable ring.
+    for (const [sx, sz] of legs) bright.push(tint(bar(T.x + sx * (r0 + 1.5), 30, T.z + sz * (r0 + 1.5), T.x + sx * (r1 + 1.5), h - 10, T.z + sz * (r1 + 1.5), 2.4), BLUE));
+    // The line carries on up the top mast, to the red light.
+    bright.push(tint(bar(T.x + 2.2, h, T.z + 2.2, T.x + 2.2, h + 112, T.z + 2.2, 1.4), BLUE), tint(bar(T.x - 2.2, h, T.z - 2.2, T.x - 2.2, h + 112, T.z - 2.2, 1.4), BLUE));
     const rr = rAt(T.ring);
     solid.push(tint(boxAt(rr * 2 + 26, 6, rr * 2 + 26, T.x, T.ring, T.z), 0x2a2c31));
     for (const [x, z, w, d] of [[T.x, T.z - rr - 13, rr * 2 + 26, 2], [T.x, T.z + rr + 13, rr * 2 + 26, 2], [T.x - rr - 13, T.z, 2, rr * 2 + 26], [T.x + rr + 13, T.z, 2, rr * 2 + 26]]) glow.push(tint(boxAt(w, 3, d, x, T.ring + 4, z), GREEN));
@@ -804,15 +913,34 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
       glow.push(tint(boxAt(Math.abs(P.x - mx), 0.6, 2, (mx + P.x) / 2, 0.5, P.z), GREEN));
       glow.push(tint(boxAt(8, 0.7, 8, mx, 0.5, mz), WHITE));
     }
-    glow.push(tint(new THREE.RingGeometry(150, 153, 48).rotateX(-Math.PI / 2).translate(P.x, 0.55, P.z + 16), BLUE));
+    // A faint ring at the edge of the point (the point's own marker carries the light; the square is lit by its boards).
+    glow.push(tint(new THREE.RingGeometry(150, 152, 48).rotateX(-Math.PI / 2).translate(P.x, 0.55, P.z + 16), new THREE.Color(BLUE).multiplyScalar(0.45)));
+    // The crossing: a second trace beside each line, via pads along them, and circuit inlays in the paving.
+    for (const [mx, mz] of mouths) {
+      glow.push(tint(boxAt(1.2, 0.6, Math.abs(P.z - mz) - 8, mx + 7, 0.5, (mz + P.z) / 2 - 4), new THREE.Color(GREEN).multiplyScalar(0.6)));
+      for (let t = 0.2; t < 0.95; t += 0.25) glow.push(tint(boxAt(5, 0.7, 5, mx, 0.55, mz + (P.z - mz) * t), WHITE));
+    }
+    for (const [x, z] of [[2470, -2335], [2815, -2340], [2560, -2380], [2735, -2380]] as const) traces.push(quad(110, 100, CELLS.circuit, x, 0.6, z, 0, 1, true));
+    // Zebra crossings over the square's north edge and from the street (a crossing, not a plaza).
+    for (let x = 2436; x < 2852; x += 15) if (Math.abs(x - 2620) > 12 && Math.abs(x - 2815) > 12) ground.push(tint(flat(7, 20, x, 0.45, -2418), 0xd9dbe0));
+    for (let z = -2404; z < -2284; z += 15) ground.push(tint(flat(20, 7, 2432, 0.45, z), 0xd9dbe0));
     // The free-standing LED boards (both faces), on black frames.
     JUNCTION_BOARDS.forEach((k, i) => {
       const lx = k.w > k.d, len = lx ? k.w : k.d;
       solid.push(tint(boxAt(k.w, k.h, k.d, k.x, k.h / 2, k.z), 0x16171b));
       for (const s of [-1, 1]) {
         const nx = lx ? 0 : s, nz = lx ? s : 0;
-        hero.push(quad(len - 8, 64, CELLS.board(i % 3), k.x + nx * (k.d / 2 + 0.6), k.h - 40, k.z + nz * (k.w / 2 + 0.6) * (lx ? 0 : 0) + (lx ? s * (k.d / 2 + 0.6) : 0), nx, nz));
-        back.push(quad(len - 8, 12, CELLS.ticker(i + s + 1), k.x + nx * (k.d / 2 + 0.6), 40, k.z + (lx ? s * (k.d / 2 + 0.6) : 0), nx, nz));
+        // The boards are the square's lights (brighter at night than the shop signs).
+        bright.push(quad(len - 8, 64, CELLS.board(i % 3), k.x + nx * (k.d / 2 + 0.6), k.h - 40, k.z + (lx ? s * (k.d / 2 + 0.6) : 0), nx, nz));
+        lit.push(quad(len - 8, 12, CELLS.ticker(i + s + 1), k.x + nx * (k.d / 2 + 0.6), 40, k.z + (lx ? s * (k.d / 2 + 0.6) : 0), nx, nz));
+        // A second ticker under the board, and a control cabinet with status lights at its foot.
+        lit.push(quad(len - 8, 10, CELLS.ticker((i + s + 2) % 4), k.x + nx * (k.d / 2 + 0.6), k.h - 82, k.z + (lx ? s * (k.d / 2 + 0.6) : 0), nx, nz));
+      }
+      // Control panels on the foot of the frame (within its footprint: nothing new to walk into), with status lights.
+      const ex = lx ? k.w / 2 - 16 : 0, ez = lx ? 0 : k.d / 2 - 16;
+      for (const e of [-1, 1]) {
+        solid.push(tint(boxAt(lx ? 22 : k.w + 2, 34, lx ? k.d + 2 : 22, k.x + e * ex, 19, k.z + e * ez), 0xb9bdc3));
+        glow.push(tint(boxAt(lx ? 3 : k.w + 3, 2.4, lx ? k.d + 3 : 3, k.x + e * ex, 30, k.z + e * ez), e > 0 ? GREEN : RED));
       }
       glow.push(tint(boxAt(lx ? k.w : k.d + 1, 2, lx ? k.d + 1 : k.w, k.x, k.h + 1, k.z), GREEN));
       pool(k.x, k.z, 50, 0xf2f6ff, 0.6);
@@ -831,7 +959,7 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
     for (const [x, z, ang] of [[2400, -2300, Math.PI / 2], [2840, -2280, Math.PI / 2]] as const) {
       solid.push(tint(boxAt(80, 4, 20, x, 20, z, ang), 0x2a2c31), tint(boxAt(70, 18, 12, x, 9, z, ang), 0x55585e));
     }
-    pool(2642, -2330, 160, 0xf2f6ff, 0.5);
+    pool(2642, -2330, 120, 0x9a9da3, 0.5);
   }
 
   // ------------------------------------------------------------ the lanes: paving, cables overhead, small lights
@@ -933,27 +1061,18 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
 
   // ------------------------------------------------------------ materials and meshes
   const tex = atlas();
-  const signMat = (i: number, tone = 0xffffff) => nearFade(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: tone, emissiveMap: tex, emissiveIntensity: i, roughness: 1 }), 30, 120);
-  // Three levels of sign light: hero (the landmarks' signs), support (shopfronts, names, wayfinding), background (blades, tickers, cards).
-  const heroMat = signMat(0.85), litMat = signMat(0.6), backMat = signMat(0.36, 0xdfe3ea);
-  const archMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.8, roughness: 1 });
   const solidMat = nearFade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.15 }), 30, 120);
-  // Light lines dissolve near the camera like the signs (a line beside the lens would fill the view).
-  const glowMat = basicNearFade(new THREE.MeshBasicMaterial({ vertexColors: true }), 30, 120);
-  const winMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const glowTex = radialGlowTexture();
   const poolMat = new THREE.MeshBasicMaterial({ map: glowTex, vertexColors: true, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   const traceMat = new THREE.MeshBasicMaterial({ map: tex, color: 0x3dff8a, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
   const wireMat = new THREE.LineBasicMaterial({ color: CABLE });
+  // Everything that gives light (signs, windows, light lines, LED beads) is one unlit mesh on the atlas: the
+  // brightness of each kind is baked into its vertex colour and how much it brightens at night into `aGain`.
+  const lightMat = lightMaterial(tex);
   NIGHT_GLOW.push({
     set: (k) => {
-      heroMat.emissiveIntensity = 0.85 + 0.2 * k;
-      litMat.emissiveIntensity = 0.6 + 0.16 * k;
-      backMat.emissiveIntensity = 0.36 + 0.12 * k;
-      winMat.color.setScalar(0.55 + 0.4 * k);
-      archMat.emissiveIntensity = 0.8 + 0.15 * k;
-      glowMat.color.setScalar(0.75 + 0.25 * k);
+      (lightMat.userData.night as { value: number }).value = k;
       poolMat.opacity = 0.1 + 0.42 * k;
       traceMat.opacity = 0.35 + 0.35 * k;
       // Cables read against the night sky as faintly lit lines.
@@ -965,7 +1084,7 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
     if (!list.length) return;
     const g = mergeGeometries(list.map((x) => {
       const n = x.index ? x.toNonIndexed() : x;
-      for (const k of Object.keys(n.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(k)) n.deleteAttribute(k);
+      for (const k of Object.keys(n.attributes)) if (!['position', 'normal', 'uv', 'color', 'aGain'].includes(k)) n.deleteAttribute(k);
       return n;
     }));
     if (!g) return;
@@ -984,14 +1103,47 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
     glowAtNight(m, 0.45, 0.8);
     add(list, m, true);
   }
-  add(hero, heroMat, false);
-  add(lit, litMat, false);
-  add(back, backMat, false);
-  add(win, winMat, false, false);
-  add(solid, solidMat, true);
-  add(glow, glowMat, false, false);
+  // Small repeated pieces: one shape each, placed by matrix (they used to be one instanced draw per shape; spread
+  // over the whole district they were always drawn anyway, so they now ride in the merged meshes).
+  const place = (geo: THREE.BufferGeometry, ms: THREE.Matrix4[], out: THREE.BufferGeometry[], color: number | number[]) =>
+    ms.forEach((m, i) => out.push(tint(geo.clone().applyMatrix4(m), Array.isArray(color) ? color[i] : color)));
+  // Pieces too small to throw a shadow worth drawing go in a mesh that casts none.
+  const detail: THREE.BufferGeometry[] = [];
+  const cast: THREE.BufferGeometry[] = [];
+  const size = new THREE.Vector3();
+  for (const g of solid) {
+    g.computeBoundingBox();
+    g.boundingBox!.getSize(size);
+    (Math.max(size.x, size.y, size.z) < 30 || Math.min(size.x, size.y, size.z) < 2.6 ? detail : cast).push(g);
+  }
+  place(new THREE.BoxGeometry(36, 30, 26), acs, detail, 0xd6d6d0);
+  // A fan's back (against the wall) is never seen.
+  const fan = new THREE.CylinderGeometry(10, 10, 3, 8).rotateX(Math.PI / 2).toNonIndexed();
+  {
+    const fp = fan.attributes.position.array as Float32Array, fn = fan.attributes.normal.array as Float32Array, kp: number[] = [], kn: number[] = [];
+    for (let v = 0; v < fp.length; v += 9) if (fn[v + 2] > -0.9) { kp.push(...fp.subarray(v, v + 9)); kn.push(...fn.subarray(v, v + 9)); }
+    fan.setAttribute('position', new THREE.Float32BufferAttribute(kp, 3));
+    fan.setAttribute('normal', new THREE.Float32BufferAttribute(kn, 3));
+    fan.deleteAttribute('uv');
+  }
+  place(fan, fans, detail, 0x3a3d44);
+  place(new THREE.CylinderGeometry(28, 28, 46, 10), tanks, cast, 0xbfc6cc);
+  place(new THREE.CylinderGeometry(2.2, 2.2, 1, 5, 1, true), pipes, detail, 0x6d6a66);
+  place(new THREE.BoxGeometry(1, 5, 10), racks, detail, 0x55585e);
+  place(new THREE.BoxGeometry(18, 26, 8), meters, detail, 0x9da1a8);
+  place(new THREE.BoxGeometry(22, 18, 18), crates, detail, crateCol);
+  place(new THREE.BoxGeometry(16, 40, 14).translate(0, 20, 0), gacha, detail, 0xe9f5ee);
+  place(new THREE.CylinderGeometry(3.5, 4.5, 28, 6), bollards, detail, 0x2a2c31);
+  place(new THREE.CylinderGeometry(16, 16, 70, 10).translate(0, 35, 0), transformers, cast, 0x8e9298);
+  const beads: THREE.BufferGeometry[] = [];
+  place(new THREE.OctahedronGeometry(3.4), leds, beads, ledCol);
+  add(cast.map((g) => hideFaces(g)), solidMat, true);
+  add(detail.map((g) => hideFaces(g)), solidMat, false);
+  add([
+    ...lightsOf(hero, 0.85, 0.2), ...lightsOf(lit, 0.6, 0.16), ...lightsOf(dim, 0.42, 0.1), ...lightsOf(back, 0.36, 0.12, 0xdfe3ea),
+    ...lightsOf(arches, 0.8, 0.15), ...lightsOf(win, 0.55, 0.4), ...lightsOf(glow.map((g) => hideFaces(g, true)), 0.75, 0.25), ...lightsOf(bright, 0.9, 0.5), ...lightsOf(beads, 0.7, 0.3),
+  ], lightMat, false, false);
   add(ground, groundMat, false);
-  add(arches, archMat, false);
   add(pools, poolMat, false, false, 1);
   add(traces, traceMat, false, false, 1);
   if (wire.length) {
@@ -1001,33 +1153,6 @@ export function buildAkihabara(scene: THREE.Scene): AkibaStats {
     ls.name = 'akihabara';
     scene.add(ls);
   }
-  // Instanced small pieces (one draw each).
-  let instanced = 0;
-  const inst = (geo: THREE.BufferGeometry, mat: THREE.Material, ms: THREE.Matrix4[], cast = true, colors?: number[]) => {
-    if (!ms.length) return;
-    const m = new THREE.InstancedMesh(geo, mat, ms.length);
-    ms.forEach((x, i) => m.setMatrixAt(i, x));
-    if (colors) { const c = new THREE.Color(); colors.forEach((v, i) => m.setColorAt(i, c.setHex(v))); }
-    m.castShadow = cast;
-    m.receiveShadow = true;
-    m.computeBoundingSphere();
-    m.name = 'akihabara';
-    scene.add(m);
-    tris += (geo.index ? geo.index.count : geo.attributes.position.count) / 3 * ms.length;
-    instanced++;
-  };
-  inst(new THREE.BoxGeometry(36, 30, 26), new THREE.MeshStandardMaterial({ color: 0xd6d6d0, roughness: 0.8 }), acs);
-  inst(new THREE.CylinderGeometry(10, 10, 3, 12).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3a3d44, roughness: 0.6, metalness: 0.3 }), fans, false);
-  inst(new THREE.CylinderGeometry(28, 28, 46, 12), new THREE.MeshStandardMaterial({ color: 0xbfc6cc, roughness: 0.6 }), tanks);
-  inst(new THREE.CylinderGeometry(2.2, 2.2, 1, 6), new THREE.MeshStandardMaterial({ color: 0x6d6a66, roughness: 0.6, metalness: 0.3 }), pipes, false);
-  inst(new THREE.BoxGeometry(1, 5, 10), new THREE.MeshStandardMaterial({ color: 0x55585e, roughness: 0.6, metalness: 0.4 }), racks, false);
-  inst(new THREE.BoxGeometry(18, 26, 8), new THREE.MeshStandardMaterial({ color: 0x9da1a8, roughness: 0.6 }), meters, false);
-  inst(new THREE.BoxGeometry(22, 18, 18), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }), crates, false, crateCol);
-  inst(new THREE.BoxGeometry(16, 40, 14).translate(0, 20, 0), new THREE.MeshStandardMaterial({ color: 0xf2f3f5, roughness: 0.5, emissive: 0x3dff8a, emissiveIntensity: 0.12 }), gacha, false);
-  inst(new THREE.CylinderGeometry(3.5, 4.5, 28, 8), new THREE.MeshStandardMaterial({ color: 0x2a2c31, roughness: 0.5, metalness: 0.4 }), bollards, false);
-  inst(new THREE.CylinderGeometry(16, 16, 70, 12).translate(0, 35, 0), new THREE.MeshStandardMaterial({ color: 0x8e9298, roughness: 0.6, metalness: 0.3 }), transformers);
-  const ledMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  NIGHT_GLOW.push({ set: (k) => { ledMat.color.setScalar(0.7 + 0.3 * k); } });
-  inst(new THREE.BoxGeometry(5, 5, 5), ledMat, leds, false, ledCol);
-  return { buildings: AKIBA_BUILT.buildings.length, bays, blades, meshes, instanced, triangles: Math.round(tris), cables };
+  const props = acs.length + fans.length + tanks.length + pipes.length + racks.length + meters.length + crates.length + gacha.length + bollards.length + transformers.length + leds.length;
+  return { buildings: AKIBA_BUILT.buildings.length, bays, blades, meshes, props, triangles: Math.round(tris), cables, alleyInfo };
 }

@@ -5,6 +5,8 @@ async function start({ base = 'http://localhost:5173/', W = 1366, H = 768, mobil
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, hasTouch: mobile, isMobile: mobile, deviceScaleFactor: dpr });
   await ctx.addInitScript((t) => { try { localStorage.setItem('sangoku.quality.v1', t); } catch {} }, tier);
+  // AUTO0=1: keep the chosen tier (no automatic step-down), for performance comparisons.
+  if (process.env.AUTO0) await ctx.addInitScript(() => { try { localStorage.setItem('tt.quality.auto.v1', '0'); } catch {} });
   // Deterministic "random" (the CPU-match deal, names…), so two builds can be compared shot for shot.
   if (seed !== undefined) await ctx.addInitScript((sd) => { let x = sd >>> 0; Math.random = () => ((x = (x * 1664525 + 1013904223) >>> 0) / 4294967296); }, seed);
   const p = await ctx.newPage();

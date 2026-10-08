@@ -191,8 +191,13 @@ describe('Akihabara reforge: as drawn', () => {
       const scene = new THREE.Scene();
       const stats = buildAkihabara(scene);
       expect(JSON.stringify(WORLD)).toBe(before);
-      expect(scene.children.length).toBeLessThanOrEqual(28);
-      expect(stats.triangles).toBeLessThan(110000);
+      // Final polish: one light mesh, small props merged, 1024×1024 sign atlas (was 25 scene children, 18,276 triangles).
+      expect(scene.children.length).toBeLessThanOrEqual(12);
+      expect(stats.triangles).toBeLessThan(17000);
+      // COMPONENT ALLEY keeps every shop, but 20–30% of its small signs and text are gone.
+      const cut = 1 - stats.alleyInfo.kept / stats.alleyInfo.before;
+      expect(cut).toBeGreaterThanOrEqual(0.2);
+      expect(cut).toBeLessThanOrEqual(0.3);
       expect(stats.buildings).toBe(AKIBA_BUILT.buildings.length);
       expect(stats.bays).toBeGreaterThanOrEqual(24);
       expect(stats.blades).toBeGreaterThanOrEqual(20);
