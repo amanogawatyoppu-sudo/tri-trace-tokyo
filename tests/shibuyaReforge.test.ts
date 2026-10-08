@@ -4,6 +4,7 @@ import { MAZE, MAZE_MAP, SKY_DECKS, SKY_H, SKY_STAIRS } from '../src/config/shib
 import { JAIL_SITES, BASE_SITES } from '../src/config/map';
 import { NATIONS } from '../src/config/nations';
 import { inAkihabara, inUeno } from './helpers';
+import { inIkebukuro } from '../src/config/ikebukuro';
 import { planPath } from '../src/ai/nav';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
@@ -13,15 +14,17 @@ import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/system
 /**
  * Everything outside the rebuilt areas, hashed on the v9.2 map (before the reforge). The centres
  * of Shinjuku (v10.1, tests/shinjukuReforge.test.ts) and Akihabara (phase 3: its zones and the
- * arcade it reworks, tests/akihabaraReforge.test.ts) and Ueno (parallel A, tests/uenoReforge.test.ts)
- * are left out as well; the hashes were taken on v9.2 with all four areas left out.
+ * arcade it reworks, tests/akihabaraReforge.test.ts), Ueno (parallel A, tests/uenoReforge.test.ts) and
+ * Ikebukuro (parallel B, tests/ikebukuroReforge.test.ts) are left out as well; the hashes were taken on
+ * map-reforge-base (bbe30ec) with all five areas left out.
  */
-const OUTSIDE = { world: '4f317b9c', lights: 'bf52038', buildings: '3146bd54', poles: '98b74d7', n: 631 };
+const OUTSIDE = { world: 'b89860f4', lights: 'ac2b353c', buildings: '5bc7db3b', poles: '98b74d7', n: 617 };
 const inShinjuku = (p: { x: number; z: number }) => p.x > -3600 && p.x < -2160 && p.z > -2270 && p.z < -640;
 const outsideShibuya = (p: { x: number; z: number }) => !(p.x > -3600 && p.x < -1894 && p.z > 1190 && p.z < 2700);
 /** Shinjuku's new pieces (deck, stairs) are all left out too: the garden stair reaches past the area's edge. */
 const newInShinjuku = (p: { group?: string }) => p.group === 'sjdeck' || p.group === 'shinjuku';
-const outside = (p: { x: number; z: number; group?: string }) => outsideShibuya(p) && !inShinjuku(p) && !newInShinjuku(p) && !inAkihabara(p) && !inUeno(p);
+const outside = (p: { x: number; z: number; group?: string }) =>
+  outsideShibuya(p) && !inShinjuku(p) && !newInShinjuku(p) && !inAkihabara(p) && !inUeno(p) && !inIkebukuro(p.x, p.z);
 /** FNV-1a over the JSON (enough to notice any change). */
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);

@@ -17,6 +17,8 @@ import {
   CULTURE_GATE, GREEN_TERRACE, GROVE_WALLS, HEDGES, HEDGE_H, RAMP_LANDING, STONE_AXIS, TRELLIS, TRUNK, TRUNK_H, UENO_HALL, UENO_LAMPS, UENO_TREES,
   WALL_H, WEST_RAMP, inUenoZone,
 } from './ueno';
+import { IKB_BUILDINGS, IKB_DECKS, IKB_LAMPS, IKB_PLANT, IKB_STAIRS, IKB_ZONES, ikbHeight } from './ikebukuro';
+import type { IkbBuilding } from './ikebukuro';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -1378,6 +1380,144 @@ export const UENO_BUILT = { trees: UENO_TREES.length };
   }
   // Park lamps (their posts are drawn by render/ueno.ts; the lamp is in the night rules like any street lamp).
   for (const l of UENO_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: true });
+}
+
+// ---------------------------------------------------------------- 池袋 ROOFTOP NETWORK (MAP REFORGE)
+/**
+ * Ikebukuro is rebuilt by hand (config/ikebukuro.ts) after the generated city, the same way as
+ * Shibuya: the generated buildings, poles, cars, vending machines, trees, lamps and parking in
+ * the rebuilt areas are taken out and the new buildings, roofs, bridges and stairs put in. The
+ * streets, sidewalk blocks and the 5号線 ramp stay. The 60-storey tower that stood in the middle
+ * of the district moves beyond the tracks (skyline only), so the low roofs read as the district.
+ * Its buildings are not added to BUILDINGS (the generic city renderer leaves them alone):
+ * render/ikebukuro.ts draws everything in group 'ikebukuro'.
+ */
+export const IKEBUKURO_BUILT: { buildings: (IkbBuilding & { h: number })[] } = { buildings: [] };
+{
+  const zone = (id: string) => IKB_ZONES.find((r) => r.id === id)!;
+  const inRect = (r: Rect, x: number, z: number) => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1;
+  const cleared = [zone('station'), zone('network')];
+  const inZone = (x: number, z: number) => cleared.some((r) => inRect(r, x, z));
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (!inZone(p.x, p.z)) continue;
+    if ((GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car')) || p.group === 'tower') prims.splice(i, 1);
+  }
+  const keep = <T extends Point>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  const sky = zone('skyline');
+  const onSkyline = (b: Building) => b.x + b.w / 2 > sky.x0 && b.x - b.w / 2 < sky.x1 && b.z + b.d / 2 > sky.z0 && b.z - b.d / 2 < sky.z1;
+  keep(BUILDINGS, (b) => (b.outside ? !onSkyline(b) : !inZone(b.x, b.z)));
+  keep(PARKINGS, (k) => !inZone(k.x, k.z));
+  keep(LIGHTS, (l) => !inZone(l.x, l.z));
+  keep(SIGNALS, (l) => !inZone(l.x, l.z));
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (!inZone(p.x, p.z)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+  // サンシャイン60 stands on beyond the tracks, where it is skyline, not the district's centre.
+  box((sky.x0 + sky.x1) / 2, (sky.z0 + sky.z1) / 2, 360, 360, realHeight(240), 'glass', { group: 'tower' });
+
+  const id = 'ikebukuro';
+  const put = (x0: number, z0: number, x1: number, z1: number, y0: number, y1: number, extra: Partial<BoxPrim> = {}) =>
+    box((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, y1, 'bldg', { y0, group: id, ...extra });
+  // Buildings: walkable roofs for the network, plain blocks for the backdrop.
+  for (const b of IKB_BUILDINGS) {
+    const h = ikbHeight(b.floors);
+    put(b.x0, b.z0, b.x1, b.z1, 0, h, { noFloor: !b.walk });
+    IKEBUKURO_BUILT.buildings.push({ ...b, h });
+  }
+  // Decks (bridges, the hub, stair landings), stairs and roof plant. The SKY LINK rests on its two roofs
+  // (no columns: nothing stands in the avenue or on the ramp).
+  // The SKY LINK's walking surface is a thin plate: it passes over the expressway ramp, whose
+  // highest end (280, further east) must stay below it; the girders under it are only drawn.
+  for (const k of IKB_DECKS) put(k.x0, k.z0, k.x1, k.z1, k.id === 'link' ? k.y - 1 : k.y - SLAB, k.y);
+  for (const s of IKB_STAIRS) {
+    prims.push({
+      kind: 'ramp', x: (s.x0 + s.x1) / 2, z: (s.z0 + s.z1) / 2, w: s.x1 - s.x0, d: s.z1 - s.z0, y0: s.low > 0 ? s.low - SLAB : 0,
+      axis: s.axis, dir: s.dir, hLow: s.low, hHigh: s.high, style: 'stairs', mat: 'bldg', group: id,
+    });
+  }
+  for (const q of IKB_PLANT) put(q.x0, q.z0, q.x1, q.z1, q.y, q.y + q.h, { noFloor: true });
+
+  // Fences: every edge of a walkable roof or deck whose outside is neither another walkable
+  // surface at the same height nor a wall rising above it. Walked in short steps, merged into runs.
+  // Chain-link: they stop bodies but not eyes (a roof sees the street, the street sees the roof).
+  const FENCE = 6, FENCE_H = 32, STEP = 10, STEP_UP_FENCE = 12;
+  const walkTops: { r: Rect; y: (x: number, z: number) => number }[] = [
+    ...IKB_BUILDINGS.filter((b) => b.walk).map((b) => ({ r: b as Rect, y: () => ikbHeight(b.floors) })),
+    ...IKB_DECKS.map((k) => ({ r: k as Rect, y: () => k.y })),
+    ...IKB_STAIRS.map((s) => ({
+      r: s as Rect,
+      y: (x: number, z: number) => {
+        const len = s.axis === 'x' ? s.x1 - s.x0 : s.z1 - s.z0;
+        const u = (s.axis === 'x' ? x - s.x0 : z - s.z0) / len;
+        const t = Math.min(1, Math.max(0, s.dir === 1 ? u : 1 - u));
+        return s.low + (s.high - s.low) * t;
+      },
+    })),
+  ];
+  const walls: { r: Rect; top: number }[] = IKB_BUILDINGS.map((b) => ({ r: b as Rect, top: ikbHeight(b.floors) }));
+  // (Edges count as inside: where two surfaces meet at a corner, the walker crosses there too.)
+  const onRect = (r: Rect, x: number, z: number) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
+  const openAt = (x: number, z: number, y: number) =>
+    walkTops.some((w) => onRect(w.r, x, z) && Math.abs(w.y(x, z) - y) <= STEP_UP_FENCE) || walls.some((w) => onRect(w.r, x, z) && w.top > y + STEP_UP_FENCE);
+  const fence = (r: Rect, y: number) => {
+    const edges: [number, number, number, number, number, number][] = [
+      [r.x0, r.z0, r.x1, r.z0, 0, -1], [r.x0, r.z1, r.x1, r.z1, 0, 1], [r.x0, r.z0, r.x0, r.z1, -1, 0], [r.x1, r.z0, r.x1, r.z1, 1, 0],
+    ];
+    for (const [ax, az, bx, bz, nx, nz] of edges) {
+      const len = Math.hypot(bx - ax, bz - az);
+      let run0 = -1;
+      for (let t = 0; t <= len; t += STEP) {
+        const m = Math.min(t + STEP / 2, len);
+        const px = ax + ((bx - ax) * m) / len, pz = az + ((bz - az) * m) / len;
+        const open = t < len && !openAt(px + nx * 4, pz + nz * 4, y);
+        if (open && run0 < 0) run0 = t;
+        if ((!open || t + STEP > len) && run0 >= 0) {
+          const t1 = open ? len : t, L = t1 - run0;
+          if (L > 2) {
+            const cx = ax + ((bx - ax) * (run0 + L / 2)) / len - nx * (FENCE / 2), cz = az + ((bz - az) * (run0 + L / 2)) / len - nz * (FENCE / 2);
+            box(cx, cz, nx ? FENCE : L, nx ? L : FENCE, y + FENCE_H, 'bldg', { y0: y, group: id, noFloor: true, seeThrough: true });
+          }
+          run0 = -1;
+        }
+      }
+    }
+  };
+  for (const b of IKB_BUILDINGS) if (b.walk) fence(b, ikbHeight(b.floors));
+  for (const k of IKB_DECKS) fence(k, k.y);
+  // Stair and bridge sides: rails in short rising pieces wherever the side is open.
+  for (const s of IKB_STAIRS) {
+    const along = s.axis === 'x' ? [s.x0, s.x1] : [s.z0, s.z1];
+    const sides = s.axis === 'x' ? [[s.z0, -1], [s.z1, 1]] : [[s.x0, -1], [s.x1, 1]];
+    const hAt = (u: number) => s.low + (s.high - s.low) * Math.min(1, Math.max(0, s.dir === 1 ? (u - along[0]) / (along[1] - along[0]) : (along[1] - u) / (along[1] - along[0])));
+    for (const [edge, n] of sides) {
+      for (let u = along[0]; u < along[1] - 1; u += 20) {
+        const u1 = Math.min(u + 20, along[1]), um = (u + u1) / 2, h = hAt(um);
+        const ox = s.axis === 'x' ? um : edge + n * 4, oz = s.axis === 'x' ? edge + n * 4 : um;
+        if (openAt(ox, oz, h)) continue;
+        // Leave the first and last stretch of a flight open where people turn onto a landing
+        // (a short drop onto the flight beside is harmless; a rail end there catches the turn).
+        if (um - along[0] < 30 || along[1] - um < 30) continue;
+        const lo = Math.min(hAt(u), hAt(u1)), hi = Math.max(hAt(u), hAt(u1));
+        if (hi < 20) continue; // the foot of a stair needs no rail
+        const fx = s.axis === 'x' ? (u + u1) / 2 : edge - n * (FENCE / 2), fz = s.axis === 'x' ? edge - n * (FENCE / 2) : (u + u1) / 2;
+        box(fx, fz, s.axis === 'x' ? u1 - u : FENCE, s.axis === 'x' ? FENCE : u1 - u, hi + FENCE_H, 'bldg', { y0: Math.max(0, lo - 10), group: id, noFloor: true, seeThrough: true });
+      }
+    }
+  }
+
+  for (const l of IKB_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
 }
 
 export const WORLD: readonly Prim[] = prims;
