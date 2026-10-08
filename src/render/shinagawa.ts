@@ -4,7 +4,7 @@ import type { BoxPrim } from '../config/map';
 import { CURB, GROUND_FLOOR, SHINAGAWA_BUILT, STOREY, WORLD, floorsToHeight, insideLoop, prng } from '../config/map';
 import type { ShinagawaBuilding, ShinagawaSide } from '../config/shinagawa';
 import {
-  ARCH, BOULEVARD, CANOPY, DECK_H, DECK_LEGS, DECK_STAIRS, FORUM, GATEWAY_POINT, PLATFORM, PROP_SIZE, SERVICE, SHINAGAWA_LAMPS, SHINAGAWA_LIGHTS,
+  ARCH, BOULEVARD, CANOPY, DECK_H, DECK_LEGS, DECK_STAIRS, FORUM, GATEWAY_POINT, PLATFORM, PLATFORM_LANE, PROP_SIZE, SERVICE, SHINAGAWA_LAMPS, SHINAGAWA_LIGHTS,
   SHINAGAWA_PROPS, TRANSIT_DECK,
 } from '../config/shinagawa';
 import { NIGHT_GLOW, glowAtNight } from './nightGlow';
@@ -329,9 +329,27 @@ export function buildShinagawa(scene: THREE.Scene): ShinagawaStats {
     const D = TRANSIT_DECK, H = DECK_H;
     const cx = (D.x0 + D.x1) / 2, cz = (D.z0 + D.z1) / 2, w = D.x1 - D.x0, d = D.z1 - D.z0;
     white.push(tint(boxAt(w, 12, d, cx, H - 6, cz), PANEL));
-    // Deck floor: light slabs with a running line down the middle.
+    // Deck floor: light slabs, and the spine itself drawn on it — a lit centre line between two
+    // lane lines, with chevrons every 160 pointing to the station (one axis, one direction).
     ground.push(tint(flat(w, d - 8, cx, H + 0.3, cz), 0xb4b9c0));
-    floorLines.push(tint(line(D.x0 + 10, cz, D.x1 - 10, cz, 3, H + 0.6), BLUEWHITE));
+    ground.push(tint(flat(w - 20, 44, cx, H + 0.4, cz), 0xc3c7cd));
+    floorLines.push(tint(line(D.x0 + 10, cz, D.x1 - 10, cz, 4, H + 0.6), BLUEWHITE));
+    for (const dz of [-22, 22]) floorLines.push(tint(line(D.x0 + 10, cz + dz, D.x1 - 10, cz + dz, 2, H + 0.6), GLASSBLUE));
+    for (let x = D.x0 + 120; x < D.x1 - 40; x += 160) {
+      for (const sg of [-1, 1]) floorLines.push(tint(line(x - 14, cz + sg * 16, x + 4, cz + sg * 3, 4, H + 0.65), BLUEWHITE));
+    }
+    // Gantries over the spine: slim white portals carrying the name and the way to the station.
+    for (const gx of [D.x0 + 250, -1050, -750]) {
+      const top = H + 165;
+      for (const z of [D.z0 + 5, D.z1 - 5]) white.push(tint(boxAt(6, top - H, 6, gx, H + (top - H) / 2, z), FRAME));
+      white.push(tint(boxAt(10, 30, d - 4, gx, top - 6, cz), FRAME));
+      glow.push(tint(boxAt(4, 1, d - 20, gx, top - 21.6, cz), BLUEWHITE));
+      for (const nx of [-1, 1]) {
+        signs.push(quad(d - 30, 20, CELLS.band(2), gx + nx * 5.4, top - 6, cz, nx, 0));
+        signs.push(quad(64, 16, CELLS.way(3), gx + nx * 5.4, top - 30, cz + 24, nx, 0));
+      }
+      pool(gx, cz, 60, BLUEWHITE, H + 0.7);
+    }
     // South fascia (faces the boulevard): white band and one continuous light line — the deck reads from far away.
     white.push(tint(boxAt(w, 26, 6, cx, H - 8, D.z1 + 3), NAVY));
     glow.push(tint(boxAt(w, 3, 1, cx, H - 12, D.z1 + 6.5), GLASSBLUE));
@@ -387,18 +405,41 @@ export function buildShinagawa(scene: THREE.Scene): ShinagawaStats {
   {
     const A = ARCH, x = (A.x0 + A.x1) / 2, w = A.x1 - A.x0;
     const z0 = A.pierN.z0, z1 = A.pierS.z1, inner0 = A.pierN.z1, inner1 = A.pierS.z0;
+    // One white, one piece: piers and lintel share a colour, the inner corners are filled with
+    // haunches so the opening reads as a portal, a dark reveal traces the outer edge against the
+    // city behind it and a fine light line traces the opening. No growth in size, no colour.
+    const ARCHWHITE = 0xe2e4e8;
     for (const p of [A.pierN, A.pierS]) {
       const pz = (p.z0 + p.z1) / 2, pd = p.z1 - p.z0, base = CURB;
       // Tapered pier: wider at the foot, a light slot on its inner face.
-      white.push(tint(boxAt(w, A.lintel0 - base, pd, x, base + (A.lintel0 - base) / 2, pz), 0xd9dce1));
+      white.push(tint(boxAt(w, A.lintel0 - base, pd, x, base + (A.lintel0 - base) / 2, pz), ARCHWHITE));
       white.push(tint(boxAt(w + 24, 60, pd + 24, x, base + 30, pz), 0xc6cbd1));
+      // Haunch: a 45° fillet where the pier meets the lintel (above every head and the deck).
+      const corner = p === A.pierN ? p.z1 : p.z0;
+      white.push(tint(new THREE.BoxGeometry(w, 64, 64).rotateX(Math.PI / 4).translate(x, A.lintel0, corner), ARCHWHITE));
       const inner = p === A.pierN ? p.z1 : p.z0, sgn = p === A.pierN ? 1 : -1;
       glow.push(tint(boxAt(8, A.lintel0 - 80, 1, x, (A.lintel0 + 80) / 2, inner + sgn * 0.8), BLUEWHITE));
       for (const fx of [A.x0, A.x1]) for (let k = 1; k <= 3; k++) white.push(tint(boxAt(2, A.lintel0 - 70, 6, fx + (fx === A.x0 ? -1 : 1), (A.lintel0 + 70) / 2, p.z0 + (pd * k) / 4), FRAME));
     }
     // Lintel: thicker at the top, a soffit line the whole span, the name on both faces.
-    white.push(tint(boxAt(w + 20, A.top - A.lintel0, z1 - z0 + 40, x, (A.lintel0 + A.top) / 2, (z0 + z1) / 2), 0xdfe2e6));
-    white.push(tint(boxAt(w - 20, 30, z1 - z0 + 60, x, A.top + 15, (z0 + z1) / 2), 0xc9ced4));
+    white.push(tint(boxAt(w + 20, A.top - A.lintel0, z1 - z0 + 40, x, (A.lintel0 + A.top) / 2, (z0 + z1) / 2), ARCHWHITE));
+    white.push(tint(boxAt(w - 20, 30, z1 - z0 + 60, x, A.top + 15, (z0 + z1) / 2), 0xd0d4d9));
+    // The outline on both faces: navy reveal round the outside, a light line round the opening.
+    const h45 = 64 / Math.SQRT2;
+    for (const nx of [-1, 1]) {
+      const fx = x + nx * (w / 2 + 10.4), px = x + nx * (w / 2 + 0.4);
+      for (const ez of [z0 - 20 + 3, z1 + 20 - 3]) white.push(tint(boxAt(1, A.top - A.lintel0, 4, fx, (A.lintel0 + A.top) / 2, ez), NAVY));
+      white.push(tint(boxAt(1, 4, z1 - z0 + 40, fx, A.top - 2, (z0 + z1) / 2), NAVY));
+      for (const ez of [z0 + 2, z1 - 2]) white.push(tint(boxAt(1, A.lintel0 - 60 - CURB, 4, px, (A.lintel0 + 60 + CURB) / 2, ez), NAVY));
+      // Opening: up the north pier, along the haunch, the soffit, the other haunch, down the south pier.
+      const y0 = 80, yH = A.lintel0 - h45;
+      glow.push(tint(boxAt(1, yH - y0, 3, px, (y0 + yH) / 2, inner0 + 2), BLUEWHITE));
+      glow.push(tint(boxAt(1, yH - y0, 3, px, (y0 + yH) / 2, inner1 - 2), BLUEWHITE));
+      glow.push(tint(boxAt(1, 3, inner1 - inner0 - 2 * h45, fx, A.lintel0 - 2, (inner0 + inner1) / 2), BLUEWHITE));
+      for (const [cz_, sg] of [[inner0, 1], [inner1, -1]] as const) {
+        glow.push(tint(new THREE.BoxGeometry(1, 3, 64).rotateX(-sg * Math.PI / 4).translate(px, A.lintel0 - h45 / 2 - 1, cz_ + sg * (h45 / 2 + 1)), BLUEWHITE));
+      }
+    }
     glow.push(tint(boxAt(12, 1, inner1 - inner0, x, A.lintel0 - 0.6, (inner0 + inner1) / 2), GLASSBLUE));
     for (const nx of [-1, 1]) {
       signs.push(quad(440, 55, CELLS.band(4), x + nx * (w / 2 + 10.6), A.lintel0 + 40, (inner0 + inner1) / 2, nx, 0));
@@ -495,6 +536,26 @@ export function buildShinagawa(scene: THREE.Scene): ShinagawaStats {
     }
     // The boulevard's axis carried on across the plaza (the long straight reads to the point).
     floorLines.push(tint(line(-1630, 4480, ARCH.x0 - 10, 4480, 3, 0.7), BLUEWHITE));
+    // The fast lane across the platform: a pale stone runway on the axis, dashed lane edges and
+    // short light bars every 80 — the floor says "this way, keep it clear" without a single object.
+    const L = PLATFORM_LANE, lx0 = ARCH.x1 + 10, edgeX = (z: number) => P.x - Math.sqrt(175 ** 2 - (z - P.z) ** 2);
+    ground.push(tint(flat(edgeX(4480) - lx0 - 10, 50, (lx0 + edgeX(4480) - 10) / 2, 0.5, 4480), 0xc1c4c8));
+    for (const z of [L.z0, L.z1]) for (let x = lx0; x < edgeX(z) - 30; x += 50) floorLines.push(tint(line(x, z, x + 30, z, 3, y), BLUEWHITE));
+    for (let x = lx0 + 40; x < edgeX(4480) - 20; x += 80) floorLines.push(tint(line(x, 4462, x, 4498, 3, y), GLASSBLUE));
+    // Station wayfinding hung from the canopy (above every head), facing the arch and the lane.
+    for (const [hx, hz, cell] of [[CANOPY.x0 - 4, 4610, 3], [CANOPY.x0 - 4, 4720, 2], [-150, CANOPY.z0 - 4, 0]] as const) {
+      const alongX = hz === CANOPY.z0 - 4;
+      for (const k of [-1, 1]) white.push(tint(boxAt(2, 40, 2, hx + (alongX ? k * 40 : 0), CANOPY.y - 30, hz + (alongX ? 0 : k * 40)), FRAME));
+      white.push(tint(boxAt(alongX ? 104 : 4, 28, alongX ? 4 : 104, hx, CANOPY.y - 64, hz), NAVY));
+      signs.push(quad(100, 25, CELLS.way(cell), hx + (alongX ? 0 : -2.4), CANOPY.y - 64, hz + (alongX ? -2.4 : 0), alongX ? 0 : -1, alongX ? -1 : 0));
+    }
+    // Stone inlays under the seating and the planters: the furniture sits on its own ground.
+    for (const p of SHINAGAWA_PROPS) {
+      if (p.kind !== 'bench' && p.kind !== 'planter') continue;
+      if (p.x < PLATFORM.x0 || p.z < PLATFORM.z0 || p.z > PLATFORM.z1) continue;
+      const s = PROP_SIZE[p.kind], rot = Math.abs(Math.sin(p.ang ?? 0)) > 0.5;
+      ground.push(tint(flat((rot ? s.d : s.w) + 30, (rot ? s.w : s.d) + 30, p.x, 0.45, p.z), 0x9ea2a7));
+    }
   }
 
   // ------------------------------------------------------------ props, lamps

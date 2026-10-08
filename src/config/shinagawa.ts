@@ -85,6 +85,8 @@ export const SERVICE: readonly { id: string; x0: number; z0: number; x1: number;
 
 /** LIGHT PLATFORM: the station square east of the arch (ground level, the strategic point inside). */
 export const PLATFORM = { x0: -470, z0: 4140, x1: 330, z1: 4880 } as const;
+/** The fast lane across the platform, from the arch to the point: marked on the floor, never furnished. */
+export const PLATFORM_LANE = { z0: 4400, z1: 4560 } as const;
 /** The station canopy over the plaza's south side. */
 export const CANOPY = { x0: -380, x1: -80, z0: 4560, z1: 4800, y: 300, cols: [[-370, 4570], [-230, 4570], [-90, 4570], [-370, 4790], [-230, 4790], [-90, 4790]] as [number, number][] } as const;
 
@@ -111,8 +113,12 @@ export const SHINAGAWA_PROPS: readonly ShinagawaProp[] = [
   { kind: 'totem', x: -680, z: 3960, ang: 0 }, { kind: 'totem', x: -130, z: 4340, ang: Math.PI / 2 },
   // LIGHT PLATFORM: planters and benches round the edge, a vent shaft, low plant by the tracks.
   { kind: 'bench', x: -330, z: 4690, ang: Math.PI / 2 }, { kind: 'bench', x: -150, z: 4690, ang: Math.PI / 2 },
-  { kind: 'planter', x: -250, z: 4380 }, { kind: 'planter', x: -30, z: 4200 }, { kind: 'bench', x: 120, z: 4220 },
+  { kind: 'planter', x: -250, z: 4362 }, { kind: 'planter', x: -30, z: 4200 }, { kind: 'bench', x: 120, z: 4220 },
   { kind: 'vent', x: 220, z: 4140 },
+  // ... and round the canopy and the edges of the fast lane (the lane z 4400–4560 itself stays empty).
+  { kind: 'bench', x: -360, z: 4366 }, { kind: 'bench', x: -300, z: 4790 }, { kind: 'bench', x: -160, z: 4790 },
+  { kind: 'planter', x: -50, z: 4660 },
+  { kind: 'totem', x: -440, z: 4385, ang: 0 }, { kind: 'totem', x: -200, z: 4600, ang: 0 }, { kind: 'totem', x: 40, z: 4580, ang: 0 },
   // North frontage (on the avenue): benches by the forum door.
   { kind: 'bench', x: -1100, z: 3954 }, { kind: 'bench', x: -850, z: 3954 },
   // Service corridor: plant against the walls (the walk stays ≥ 90 wide).
@@ -130,7 +136,7 @@ export const PROP_SIZE: Record<ShinagawaProp['kind'], { w: number; d: number; h:
 
 /** Street trees: the boulevard's south walk, the plaza and the forum hall. */
 export const SHINAGAWA_TREES: readonly [number, number][] = [
-  [-1560, 4618], [-1360, 4618], [-1160, 4618], [-1000, 4618], [-800, 4618], [-620, 4618],
+  [-1560, 4618], [-1360, 4618], [-1160, 4618], [-1000, 4618], [-800, 4618],
   [-440, 4760], [-300, 4880], [-120, 4860], [80, 4300],
   [-1080, 4060], [-850, 4120],
 ];

@@ -3,7 +3,7 @@ import {
   BASE_SITES, BLOCKS, BUILDINGS, CROSSWALKS, INTERSECTIONS, JAIL_SITES, LIGHTS, PARKINGS, POLES, SHINAGAWA_BUILT, SIGNALS, STREET_SEGS, WALK_EDGE, WORLD, insideLoop,
 } from '../src/config/map';
 import {
-  ARCH, BOULEVARD, CANOPY, DECK_H, DECK_STAIRS, FORUM, GATEWAY_POINT, SERVICE, SHINAGAWA_LIGHTS, SHINAGAWA_ZONE, TRANSIT_DECK,
+  ARCH, BOULEVARD, CANOPY, DECK_H, DECK_STAIRS, FORUM, GATEWAY_POINT, PLATFORM, PLATFORM_LANE, SERVICE, SHINAGAWA_LIGHTS, SHINAGAWA_PROPS, SHINAGAWA_ZONE, TRANSIT_DECK,
 } from '../src/config/shinagawa';
 import { NATIONS } from '../src/config/nations';
 import { planPath } from '../src/ai/nav';
@@ -91,6 +91,21 @@ describe('Shinagawa reforge: A. GATEWAY BOULEVARD', () => {
       if (w.y0 > 100 || w.mat === 'sidewalk' || !inShinagawa(w)) continue;
       const overRoad = w.x + w.w / 2 > BOULEVARD.x0 && w.x - w.w / 2 < -470 && w.z + w.d / 2 > BOULEVARD.road0 && w.z - w.d / 2 < BOULEVARD.road1;
       expect(overRoad, `${w.mat} ${w.group ?? ''} at ${w.x},${w.z}`).toBe(false);
+    }
+  });
+});
+
+describe('Shinagawa reforge: LIGHT PLATFORM', () => {
+  it('furnishes the platform but leaves its fast lane (arch to point) empty and runnable', () => {
+    const L = PLATFORM_LANE, P = GATEWAY_POINT;
+    expect(SHINAGAWA_PROPS.filter((p) => p.x > PLATFORM.x0 && p.z > PLATFORM.z0 && p.z < PLATFORM.z1).length).toBeGreaterThanOrEqual(12);
+    for (const w of WORLD) {
+      if (w.y0 > 100 || w.mat === 'sidewalk' || !inShinagawa(w)) continue;
+      const inLane = w.x + w.w / 2 > ARCH.x1 && w.x - w.w / 2 < P.x && w.z + w.d / 2 > L.z0 && w.z - w.d / 2 < L.z1;
+      expect(inLane, `${w.mat} ${w.group ?? ''} at ${w.x},${w.z}`).toBe(false);
+    }
+    for (const z of [L.z0 + 20, (L.z0 + L.z1) / 2, L.z1 - 20]) {
+      for (let x = ARCH.x1 + 10; x < P.x - 160; x += 20) expect(canWalk({ x, y: 0, z }, x + 20, 0, z), `x ${x} z ${z}`).toBe(true);
     }
   });
 });
