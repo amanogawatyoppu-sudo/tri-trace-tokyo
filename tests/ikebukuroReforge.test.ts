@@ -5,15 +5,20 @@ import { NATIONS } from '../src/config/nations';
 import { navGraph, planPath } from '../src/ai/nav';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { STEP_UP, blocked, canWalk, lineOfSight, supportHeight } from '../src/sim/systems/world';
+import { inShinagawa, inUeno } from './helpers';
 
 /** MAP REFORGE: Ikebukuro rebuilt as the ROOFTOP NETWORK (layout in config/ikebukuro.ts). */
 
-/** Everything outside the rebuilt zones, hashed on the base (map-reforge-base bbe30ec) before this reforge. */
+/**
+ * Everything outside the rebuilt zones, hashed on the base (map-reforge-base bbe30ec) before this reforge.
+ * Ueno and Shinagawa (the other parallel reforges, merged in map-reforge-parallel-integrated) are left
+ * out too; the hashes were taken on bbe30ec with all three areas left out.
+ */
 const OUTSIDE = {
-  world: '694f016b', lights: 'd0b3df83', buildings: 'a6566226', poles: 'a7c3c60d', signals: '984f4ca8',
-  crosswalks: '691db889', parkings: '4a570927', streets: 'da94192d', blocks: '4f96b2a7', n: 843,
+  world: 'dcacc84f', lights: '630bd93e', buildings: '40c9a6af', poles: '9cd049e0', signals: '984f4ca8',
+  crosswalks: '1116d479', parkings: '4a570927', streets: 'ef0c1abf', blocks: 'ca9ee239', n: 794,
 };
-const outside = (p: { x: number; z: number }) => !inIkebukuro(p.x, p.z);
+const outside = (p: { x: number; z: number }) => !inIkebukuro(p.x, p.z) && !inUeno(p) && !inShinagawa(p);
 /** FNV-1a over the JSON (enough to notice any change). */
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);

@@ -19,6 +19,8 @@ import {
 } from './ueno';
 import { IKB_BUILDINGS, IKB_DECKS, IKB_LAMPS, IKB_PLANT, IKB_STAIRS, IKB_ZONES, ikbHeight } from './ikebukuro';
 import type { IkbBuilding } from './ikebukuro';
+import * as SHG from './shinagawa';
+import type { ShinagawaBuilding } from './shinagawa';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -649,7 +651,7 @@ export interface Building {
   /** Beyond the tracks: scenery only. */
   outside: boolean;
   /** Drawn by its district's own renderer (v10: the rebuilt centres of Shibuya, Shinjuku and Akihabara), not the generic city. */
-  custom?: 'shibuya' | 'shinjuku' | 'akihabara';
+  custom?: 'shibuya' | 'shinjuku' | 'akihabara' | 'shinagawa';
 }
 export interface StreetSeg { x: number; z: number; w: number; d: number; axis: 'x' | 'z'; kind: StreetKind }
 export interface Block { x0: number; z0: number; x1: number; z1: number; sides: Record<Side, StreetKind> }
@@ -1518,6 +1520,150 @@ export const IKEBUKURO_BUILT: { buildings: (IkbBuilding & { h: number })[] } = {
   }
 
   for (const l of IKB_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
+}
+
+// ---------------------------------------------------------------- 品川 FUTURE GATEWAY (MAP REFORGE parallel C)
+/**
+ * The west side of the tracks between 高輪ゲートウェイ and 品川 is rebuilt by hand
+ * (config/shinagawa.ts) after the generated city, the same way as the other reforged districts:
+ * the generated pieces in the area (and the old walk-up that crowded the strategic point) are
+ * taken out and the gateway put in — GATEWAY BOULEVARD, the TRANSIT DECK and its three stairs,
+ * GATEWAY ARCH, GLASS FORUM, the SERVICE CORRIDOR and the LIGHT PLATFORM. The STAR base, its
+ * LOCK POINT and the strategic point stay where they were, on open ground.
+ */
+export const SHINAGAWA_BUILT: { buildings: (ShinagawaBuilding & { h: number })[] } = { buildings: [] };
+{
+  const Z = SHG.SHINAGAWA_ZONE;
+  const inZone = (x: number, z: number) => x > Z.x0 && x < Z.x1 && z > Z.z0 && z < Z.z1;
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree', 'sidewalk']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (!inZone(p.x, p.z)) continue;
+    if ((GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car')) || p.group === 'walkupT') prims.splice(i, 1);
+  }
+  const keep = <T,>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  const out = (p: Point) => !inZone(p.x, p.z);
+  keep(BUILDINGS, (b) => b.outside || out(b));
+  keep(PARKINGS, out);
+  keep(LIGHTS, out);
+  keep(SIGNALS, out);
+  keep(STREET_SEGS, out);
+  keep(INTERSECTIONS, out);
+  keep(CROSSWALKS, out);
+  keep(BLOCKS, (b) => out({ x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2 }));
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (out(p)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+
+  // GATEWAY BOULEVARD: the carriageway between raised walks. The LIGHT PLATFORM and the STAR
+  // base stay at street level (the strategic point is a ground spot).
+  const B = SHG.BOULEVARD, BASE_Z0 = BASE_SITES.star.z - 250, BASE_X0 = BASE_SITES.star.x - 250;
+  STREET_SEGS.push({ x: (-1654 + B.x1) / 2, z: (B.road0 + B.road1) / 2, w: B.x1 + 1654, d: B.road1 - B.road0, axis: 'x', kind: 'avenue' });
+  const pave = (x0: number, z0: number, x1: number, z1: number, sides: Block['sides']) => {
+    box((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, CURB, 'sidewalk');
+    BLOCKS.push({ x0, z0, x1, z1, sides });
+  };
+  pave(-1654, 3890, B.x1, B.road0, { n: 'avenue', s: 'avenue', w: 'street', e: 'alley' });
+  pave(-1654, B.road1, BASE_X0, 5061, { n: 'avenue', s: 'street', w: 'street', e: 'alley' });
+  pave(BASE_X0, B.road1, B.x1, BASE_Z0, { n: 'avenue', s: 'alley', w: 'alley', e: 'alley' });
+
+  // Buildings: a podium and (towers) a set-back shaft.
+  const rnd = prng(2828);
+  for (const b of SHG.SHINAGAWA_BUILDINGS) {
+    const h = b.skin === 'service' ? b.floors * STOREY + 30 : floorsToHeight(b.floors), x = (b.x0 + b.x1) / 2, z = (b.z0 + b.z1) / 2, w = b.x1 - b.x0, d = b.z1 - b.z0;
+    if (b.setback && b.podium) {
+      const ph = floorsToHeight(b.podium), s = b.setback;
+      box(x, z, w, d, ph, 'bldg', { noFloor: true });
+      box(x, z, w - 2 * s, d - 2 * s, h, 'bldg', { noFloor: true, y0: ph });
+    } else box(x, z, w, d, h, 'bldg', { noFloor: true });
+    BUILDINGS.push({ x, z, w, d, h, type: b.floors >= 12 ? 'tower' : b.floors <= 3 ? 'shop' : 'office', floors: b.floors, district: 'business', front: b.fronts[0], seed: Math.floor(rnd() * 1e9), outside: false, custom: 'shinagawa' });
+    SHINAGAWA_BUILT.buildings.push({ ...b, h });
+  }
+
+  // GLASS FORUM: glass walls (you see through them) with doors, a light roof.
+  {
+    const F = SHG.FORUM, T = 14, id = 'shgForum';
+    const wall = (side: 'n' | 's' | 'e' | 'w', gaps: { at: number; w: number }[]) => {
+      const horiz = side === 'n' || side === 's';
+      const a0 = horiz ? F.x0 : F.z0, a1 = horiz ? F.x1 : F.z1;
+      const fixed = side === 'n' ? F.z0 + T / 2 : side === 's' ? F.z1 - T / 2 : side === 'w' ? F.x0 + T / 2 : F.x1 - T / 2;
+      let a: number = a0;
+      for (const [g0, g1] of [...gaps.map((g) => [g.at - g.w / 2, g.at + g.w / 2]), [a1, a1]]) {
+        if (g0 - a > 1) {
+          if (horiz) box((a + g0) / 2, fixed, g0 - a, T, F.h, 'glass', { group: id, seeThrough: true, noFloor: true });
+          else box(fixed, (a + g0) / 2, T, g0 - a, F.h, 'glass', { group: id, seeThrough: true, noFloor: true });
+        }
+        a = g1;
+      }
+    };
+    wall('n', [SHG.FORUM.doorN]);
+    wall('s', [SHG.FORUM.doorS]);
+    wall('w', [SHG.FORUM.doorW]);
+    wall('e', []);
+    box((F.x0 + F.x1) / 2, (F.z0 + F.z1) / 2, F.x1 - F.x0, F.z1 - F.z0, F.h, 'glass', { y0: F.h - SLAB, group: id, noFloor: true });
+  }
+
+  // TRANSIT DECK: slab, glass balustrades where the edge is open (deck and street see each other), colonnade, the three stairs.
+  {
+    const D = SHG.TRANSIT_DECK, H = SHG.DECK_H, id = 'shgDeck', RAIL = 6, RAIL_H = 34;
+    slab((D.x0 + D.x1) / 2, (D.z0 + D.z1) / 2, D.x1 - D.x0, D.z1 - D.z0, H, 'metal', id);
+    const solidHere = (x: number, z: number) => SHG.DECK_STAIRS.some((s) => x > s.x0 - 1 && x < s.x1 + 1 && z > s.z0 - 1 && z < s.z1 + 1)
+      || SHINAGAWA_BUILT.buildings.some((b) => x > b.x0 - 1 && x < b.x1 + 1 && z > b.z0 - 1 && z < b.z1 + 1)
+      || (x > SHG.FORUM.x0 - 1 && x < SHG.FORUM.x1 + 1 && z > SHG.FORUM.z0 - 1 && z < SHG.FORUM.z1 + 1);
+    const edges: [number, number, number, number, number, number][] = [
+      [D.x0, D.z0, D.x1, D.z0, 0, -1], [D.x0, D.z1, D.x1, D.z1, 0, 1], [D.x0, D.z0, D.x0, D.z1, -1, 0], [D.x1, D.z0, D.x1, D.z1, 1, 0],
+    ];
+    for (const [ax, az, bx, bz, nx, nz] of edges) {
+      const len = Math.hypot(bx - ax, bz - az), STEP = 10;
+      let run0 = -1;
+      for (let t = 0; t <= len; t += STEP) {
+        const px = ax + ((bx - ax) * Math.min(t + STEP / 2, len)) / len, pz = az + ((bz - az) * Math.min(t + STEP / 2, len)) / len;
+        const open = t < len && !solidHere(px + nx * 4, pz + nz * 4);
+        if (open && run0 < 0) run0 = t;
+        if ((!open || t + STEP > len) && run0 >= 0) {
+          const t1 = open ? len : t, L = t1 - run0;
+          if (L > 2) {
+            const cx = ax + ((bx - ax) * (run0 + L / 2)) / len - nx * (RAIL / 2), cz = az + ((bz - az) * (run0 + L / 2)) / len - nz * (RAIL / 2);
+            box(cx, cz, nx ? RAIL : L, nx ? L : RAIL, H + RAIL_H, 'glass', { y0: H, group: id, seeThrough: true });
+          }
+          run0 = -1;
+        }
+      }
+    }
+    for (const [x, z] of SHG.DECK_LEGS) box(x, z, 24, 24, H - SLAB, 'metal', { group: id });
+    for (const s of SHG.DECK_STAIRS) ramp((s.x0 + s.x1) / 2, (s.z0 + s.z1) / 2, s.x1 - s.x0, s.z1 - s.z0, s.axis, s.dir, s.low, H, 'stairs', 'metal', id);
+  }
+
+  // GATEWAY ARCH: two piers and the lintel over the deck and the boulevard.
+  {
+    const A = SHG.ARCH, x = (A.x0 + A.x1) / 2, w = A.x1 - A.x0, id = 'shgArch';
+    for (const p of [A.pierN, A.pierS]) box(x, (p.z0 + p.z1) / 2, w, p.z1 - p.z0, A.top, 'concrete', { group: id, noFloor: true });
+    box(x, (A.pierN.z0 + A.pierS.z1) / 2, w, A.pierS.z1 - A.pierN.z0, A.top, 'concrete', { y0: A.lintel0, group: id, noFloor: true });
+  }
+  // The station canopy (roof out of reach) and its columns.
+  {
+    const C = SHG.CANOPY, id = 'shgCanopy';
+    box((C.x0 + C.x1) / 2, (C.z0 + C.z1) / 2, C.x1 - C.x0, C.z1 - C.z0, C.y, 'metal', { y0: C.y - 10, group: id, noFloor: true });
+    for (const [x, z] of C.cols) box(x, z, 16, 16, C.y - 10, 'metal', { group: id, noFloor: true });
+  }
+
+  // Street furniture: props, trees, lamps.
+  for (const p of SHG.SHINAGAWA_PROPS) {
+    const s = SHG.PROP_SIZE[p.kind], turn = Math.abs(Math.sin(p.ang ?? 0)) > 0.5, onWalk = p.x < B.x1 && p.z > 3890 && p.z < 5061 && !(p.z > B.road0 && p.z < B.road1);
+    box(p.x, p.z, turn ? s.d : s.w, turn ? s.w : s.d, s.h + (onWalk ? CURB : 0), 'metal', { group: 'shgProp', noFloor: true });
+  }
+  for (const [x, z] of SHG.SHINAGAWA_TREES) tree(x, z, 260);
+  for (const l of SHG.SHINAGAWA_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
 }
 
 export const WORLD: readonly Prim[] = prims;

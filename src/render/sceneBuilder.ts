@@ -11,6 +11,7 @@ import { buildShinjuku } from './shinjuku';
 import { buildAkihabara } from './akihabara';
 import { buildUeno } from './ueno';
 import { buildIkebukuro } from './ikebukuro';
+import { buildShinagawa } from './shinagawa';
 import { buildStairLights } from './stairLights';
 import { buildBases, buildLockPoints } from './objectives';
 import { NIGHT_GLOW } from './nightGlow';
@@ -314,6 +315,8 @@ function buildWorld(scene: THREE.Scene): void {
     if (p.group === 'arcade' || p.group === 'akibaGate' || p.group === 'akibaTower' || p.group === 'akibaPower' || p.group === 'akibaBoard') continue;
     // Ueno's trees, hedges, walls, balustrade, gate, trellis and hall are drawn by render/ueno.ts.
     if (p.group === 'uenoTree' || p.group === 'uenoHedge' || p.group === 'uenoWall' || p.group === 'uenoRail' || p.group === 'uenoGate' || p.group === 'uenoTrellis' || p.group === 'uenoHall') continue;
+    // Shinagawa's deck, arch, forum, canopy and street props are drawn by render/shinagawa.ts.
+    if (p.group?.startsWith('shg')) continue;
     if (p.kind === 'ramp') { add(matKey(p), rampGeometry(p)); continue; }
     const b = p as BoxPrim;
     const h = b.y1 - b.y0, key = matKey(b);
@@ -615,6 +618,8 @@ export function buildScene(canvas: HTMLCanvasElement): SceneRefs {
   buildUeno(scene);
   // MAP REFORGE: Ikebukuro ROOFTOP NETWORK (drawn by render/ikebukuro.ts).
   buildIkebukuro(scene);
+  // MAP REFORGE parallel C: 品川 FUTURE GATEWAY.
+  buildShinagawa(scene);
   buildStairLights(scene);
   const train = buildRailway(scene);
   // A fixed handful of lamp lights (never more or fewer: that would recompile every material).

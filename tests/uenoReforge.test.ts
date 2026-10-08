@@ -12,15 +12,19 @@ import { planPath } from '../src/ai/nav';
 import { inLight } from '../src/sim/night';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
+import { inIkebukuro } from '../src/config/ikebukuro';
+import { inShinagawa } from './helpers';
 
 /**
  * MAP REFORGE (parallel A): 上野 GREEN HEIGHTS (layout in config/ueno.ts). Everything outside the
  * rebuilt area is hashed against the map-reforge-base map (bbe30ec), taken before Ueno was touched:
- * Shibuya, Shinjuku, Akihabara and the rest of Tokyo included.
+ * Shibuya, Shinjuku, Akihabara and the rest of Tokyo included. Ikebukuro and Shinagawa (the other
+ * parallel reforges, merged in map-reforge-parallel-integrated) are left out too, and the hashes were
+ * taken on bbe30ec with all three areas left out.
  */
 const UENO = 4;
 const BEFORE = {
-  world: '53ed3082', n: 844, lights: 'ad20c80f', buildings: '6480782b', poles: 'a7c3c60d', wires: 'f21701f4', streets: '1613cae0', places: 'b6abbd6c',
+  world: 'dcacc84f', n: 794, lights: '630bd93e', buildings: '40c9a6af', poles: '9cd049e0', wires: 'f03feef7', streets: 'abf581dd', places: 'b6abbd6c',
 };
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);
@@ -28,7 +32,9 @@ const hash = (v: unknown) => {
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
   return h.toString(16);
 };
-const out = (p: { x: number; z: number }) => !inUenoZone(p.x, p.z);
+/** The other parallel reforges (池袋, 品川). */
+const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p);
+const out = (p: { x: number; z: number }) => !inUenoZone(p.x, p.z) && !others(p);
 const mine = (p: Prim) => inUenoZone(p.x, p.z);
 /** Solids someone on the ground walks into (not floors, not water, not the hill's own terrain). */
 const groundSolids = () => WORLD.filter((w) => mine(w) && w.kind === 'box' && w.y0 < 40 && w.y1 > 14 && w.mat !== 'water' && w.mat !== 'sidewalk');
@@ -38,7 +44,7 @@ describe('Ueno reforge: the rest of Tokyo is untouched', () => {
   it('leaves every primitive, lamp, building, pole, street and place outside Ueno exactly as on map-reforge-base', () => {
     const blk = (b: { x0: number; z0: number; x1: number; z1: number }) => out({ x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2 });
     expect({
-      world: hash(WORLD.filter(out)), n: WORLD.filter(out).length, lights: hash(LIGHTS.filter(out)), buildings: hash(BUILDINGS.filter((b) => b.outside || out(b))),
+      world: hash(WORLD.filter(out)), n: WORLD.filter(out).length, lights: hash(LIGHTS.filter(out)), buildings: hash(BUILDINGS.filter((b) => (b.outside || !inUenoZone(b.x, b.z)) && !others(b))),
       poles: hash(POLES.filter(out)), wires: hash(WIRES.filter(([a, b]) => out(POLES[a]) && out(POLES[b])).map(([a, b]) => [POLES[a], POLES[b]])),
       streets: hash([STREET_SEGS.filter(out), INTERSECTIONS.filter(out), CROSSWALKS.filter(out), SIGNALS.filter(out), BLOCKS.filter(blk), PARKINGS.filter(out), FOOTBRIDGES]),
       places: hash([BASE_SITES, JAIL_SITES, SECTORS.filter((s) => s.id !== UENO).map((s) => sectorPoint(s.id))]),
