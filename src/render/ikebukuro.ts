@@ -22,14 +22,15 @@ import type { FacadeKind } from './textures';
  *
  * Repeated roof equipment comes from a handful of instanced meshes (air-con, tanks, vents,
  * antennas, dishes, fence posts, stair treads, shrubs); everything else is merged per material
- * (one 1024² atlas for every sign; façades share the generic city's textures).
+ * (one 1024×512 atlas for every sign; façades share the generic city's textures).
  */
 
 /** Ikebukuro's light colours: red accent, violet, cool white, grey-white (never a faction hue; see tests). */
 export const IKEBUKURO_LIGHTS = [0xff2a3a, 0x8a5cff, 0xeef2ff, 0xc8d0dc] as const;
 const RED = IKEBUKURO_LIGHTS[0], VIOLET = IKEBUKURO_LIGHTS[1], WHITE = IKEBUKURO_LIGHTS[2];
 
-const ATLAS = 1024;
+/** Signs are drawn at design size on a 1024² scratch canvas, then copied into the packed 1024×512 texture. */
+const ATLAS = 1024, PACK_W = 1024, PACK_H = 512;
 type Cell = [number, number, number, number];
 const CELLS = {
   window: (i: number): Cell => [(i % 4) * 256, Math.floor(i / 4) * 160, 256, 160],
@@ -42,6 +43,25 @@ const CELLS = {
   station: [768, 768, 256, 96] as Cell,
   swatch: [790, 900, 40, 40] as Cell,
 };
+const way4 = (i: number): Cell => [512 + ((i - 4) % 2) * 256, 576 + Math.floor((i - 4) / 2) * 48, 256, 48];
+/** Where each design cell lands in the texture: shop windows, blades, the cabinet and fascias at half size, boards at ¾. */
+const PACKED = new Map<string, Cell>();
+{
+  const put = (c: Cell, p: Cell) => PACKED.set(c.join(), p);
+  for (let i = 0; i < 8; i++) {
+    put(CELLS.window(i), [i * 128, 0, 128, 80]);
+    put(CELLS.name(i), [(i % 4) * 256, 80 + Math.floor(i / 4) * 48, 256, 48]);
+    put(CELLS.blade(i), [i * 32, 336, 32, 128]);
+  }
+  for (let i = 0; i < 4; i++) put(CELLS.way(i), [(i % 2) * 256, 176 + Math.floor(i / 2) * 80, 256, 80]);
+  for (let i = 4; i < 8; i++) put(way4(i), [512, 176 + (i - 4) * 48, 256, 48]);
+  put(CELLS.station, [768, 176, 256, 96]);
+  put(CELLS.cabinet, [768, 272, 128, 128]);
+  put(CELLS.swatch, [904, 280, 24, 24]);
+  put(CELLS.board(0), [256, 336, 192, 120]);
+  put(CELLS.board(1), [512, 368, 192, 120]);
+  for (let i = 0; i < 2; i++) put(CELLS.fascia(i), [0, 464 + i * 24, 512, 24]);
+}
 const NAMES = ['GRAY DELI', 'KOMA BOOKS', 'ROOF CAFE', 'TSUKI CURRY', 'NORTH GEAR', 'AOI DENKI', '7F STUDIO', 'MINT RAMEN'];
 const BLADES = ['喫茶', '古書', '定食', 'ラーメン', '整体', '中古', 'カフェ', '画材'];
 const WAY: [string, string, string][] = [
@@ -106,7 +126,7 @@ function atlas(): THREE.CanvasTexture {
   });
   // Wayfinding plates: charcoal with a red or violet arrow block.
   WAY.forEach(([jp, en, arrow], i) => {
-    const [x, y, w, h] = i < 4 ? CELLS.way(i) : [512 + ((i - 4) % 2) * 256, 576 + Math.floor((i - 4) / 2) * 48, 256, 48] as Cell;
+    const [x, y, w, h] = i < 4 ? CELLS.way(i) : way4(i);
     g.fillStyle = '#1e2128'; g.fillRect(x, y, w, h);
     g.fillStyle = css(i % 2 ? VIOLET : RED); g.fillRect(x, y, h * 0.8, h);
     text(arrow, x + h * 0.4, y + h / 2 + 2, h * 0.62, '#ffffff', 'center', '900');
@@ -165,7 +185,17 @@ function atlas(): THREE.CanvasTexture {
     const [x, y, w, h] = CELLS.swatch;
     g.fillStyle = '#ffffff'; g.fillRect(x - 6, y - 6, w + 12, h + 12);
   }
-  const tex = new THREE.CanvasTexture(c);
+  const out = document.createElement('canvas');
+  out.width = PACK_W;
+  out.height = PACK_H;
+  const o = out.getContext('2d')!;
+  o.imageSmoothingEnabled = true;
+  o.imageSmoothingQuality = 'high';
+  for (const [k, [px, py, pw, ph]] of PACKED) {
+    const [x, y, w, h] = k.split(',').map(Number);
+    o.drawImage(c, x, y, w, h, px, py, pw, ph);
+  }
+  const tex = new THREE.CanvasTexture(out);
   tex.anisotropy = 4;
   return tex;
 }
@@ -173,8 +203,8 @@ function atlas(): THREE.CanvasTexture {
 /** A flat textured quad facing (nx, 0, nz), mapped to an atlas cell. */
 function quad(w: number, h: number, cell: Cell, x: number, y: number, z: number, nx: number, nz: number): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(w, h);
-  const [cx, cy, cw, ch] = cell;
-  const u0 = cx / ATLAS, u1 = (cx + cw) / ATLAS, v1 = 1 - cy / ATLAS, v0 = 1 - (cy + ch) / ATLAS;
+  const [cx, cy, cw, ch] = PACKED.get(cell.join())!;
+  const u0 = cx / PACK_W, u1 = (cx + cw) / PACK_W, v1 = 1 - cy / PACK_H, v0 = 1 - (cy + ch) / PACK_H;
   const uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) * (u1 - u0), v0 + uv.getY(i) * (v1 - v0));
   g.rotateY(Math.atan2(nx, nz));
@@ -218,7 +248,7 @@ const SKIN: Record<IkbBuilding['skin'], { tex: FacadeKind; tint: number }> = {
 /** Lit windows: cool and neutral interiors. */
 const WINDOW_LIGHTS = [0xeef2ff, 0xf6f1e6, 0xdfe6ff, 0xe9e0ff];
 
-export interface IkebukuroStats { buildings: number; meshes: number; instanced: number; triangles: number; treads: number; fencePanels: number; lamps: number }
+export interface IkebukuroStats { buildings: number; meshes: number; instanced: number; triangles: number; treads: number; fencePanels: number; parapets: number; lamps: number }
 
 /** The ROOFTOP LOOP: roofs and decks whose fences facing the lane court carry the red line. */
 const LOOP_COURT = { x0: IKB_LANE.x0 - 2, x1: IKB_LANE.x1 + 2, z0: -4565, z1: IKB_ALLEY.z0 + 2 };
@@ -398,8 +428,48 @@ export function buildIkebukuro(scene: THREE.Scene): IkebukuroStats {
   }
 
   // ------------------------------------------------------------ fences (from the collision fences)
-  let fencePanels = 0;
+  let fencePanels = 0, parapets = 0;
+  // Ordinary roof edges get a low concrete parapet instead of chain-link (drawing only: the
+  // collision fence underneath is the same). Chain-link stays on bridges, the hub, landings,
+  // round every stair and fire escape. Roof edges on the ROOFTOP LOOP court keep the red line on the coping.
+  const gap = (p: BoxPrim, r: { x0: number; z0: number; x1: number; z1: number }) =>
+    Math.max(r.x0 - (p.x + p.w / 2), p.x - p.w / 2 - r.x1, 0) + Math.max(r.z0 - (p.z + p.d / 2), p.z - p.d / 2 - r.z1, 0);
+  const onRoof = (p: BoxPrim) => Math.abs(p.y0 - R3) < 1 && all.some((b) => b.walk && gap(p, { x0: b.x0 + 8, z0: b.z0 + 8, x1: b.x1 - 8, z1: b.z1 - 8 }) > 0 && gap(p, { x0: b.x0 - 4, z0: b.z0 - 4, x1: b.x1 + 4, z1: b.z1 + 4 }) === 0);
+  const nearWay = (p: BoxPrim) => IKB_DECKS.some((k) => gap(p, k) < 36) || IKB_STAIRS.some((t) => gap(p, t) < 36);
+  const parapetAt = (p: BoxPrim, loop: boolean) => {
+    const alongX = p.w >= p.d, len = alongX ? p.w : p.d, y = p.y0;
+    solid.push(tint(boxAt(alongX ? len : 6, 30, alongX ? 6 : len, p.x, y + 15, p.z), 0x868c95));
+    solid.push(tint(boxAt(alongX ? len : 9, 3, alongX ? 9 : len, p.x, y + 31.5, p.z), 0xb7bdc5));
+    if (loop) red.push(tint(boxAt(alongX ? len : 2, 2, alongX ? 2 : len, p.x, y + 34, p.z), RED));
+    parapets++;
+  };
   const fenceAt = (p: BoxPrim) => {
+    const alongX = p.w >= p.d, len = alongX ? p.w : p.d, y = p.y0;
+    // ROOFTOP LOOP: a red line along the fences that look into the lane court.
+    const inCourt = (x: number, z: number) => x > LOOP_COURT.x0 && x < LOOP_COURT.x1 && z > LOOP_COURT.z0 && z < LOOP_COURT.z1;
+    const nearCourt = alongX ? inCourt(p.x, p.z + 8) || inCourt(p.x, p.z - 8) : inCourt(p.x + 8, p.z) || inCourt(p.x - 8, p.z);
+    const courtEdge = alongX ? Math.abs(p.z - LOOP_COURT.z0) < 20 || Math.abs(p.z - LOOP_COURT.z1) < 70 : Math.abs(p.x - LOOP_COURT.x0) < 12 || Math.abs(p.x - LOOP_COURT.x1) < 12;
+    const loop = nearCourt && courtEdge && y > 150;
+    if (onRoof(p)) {
+      // Long roof edges: parapet where the edge is clear of every way up or across, chain-link near them.
+      const n = Math.max(1, Math.round(len / 10)), step = len / n;
+      const piece = (i: number, j: number): BoxPrim => {
+        const c = -len / 2 + ((i + j) / 2) * step, l = (j - i) * step;
+        return { ...p, x: alongX ? p.x + c : p.x, z: alongX ? p.z : p.z + c, w: alongX ? l : p.w, d: alongX ? p.d : l };
+      };
+      const par = Array.from({ length: n }, (_, i) => !nearWay(piece(i, i + 1)));
+      if (par.every((v) => !v)) return drawFence(p, loop);
+      for (let i = 0; i < n; ) {
+        let j = i;
+        while (j < n && par[j] === par[i]) j++;
+        if (par[i]) parapetAt(piece(i, j), loop); else drawFence(piece(i, j), loop);
+        i = j;
+      }
+      return;
+    }
+    drawFence(p, loop);
+  };
+  const drawFence = (p: BoxPrim, loop: boolean) => {
     const alongX = p.w >= p.d, len = alongX ? p.w : p.d, y = p.y0, ang = alongX ? 0 : Math.PI / 2;
     const H = 44;
     mesh.push(new THREE.PlaneGeometry(len, H).rotateY(ang).translate(p.x, y + H / 2 + 2, p.z));
@@ -410,11 +480,7 @@ export function buildIkebukuro(scene: THREE.Scene): IkebukuroStats {
       const t = -len / 2 + (len * k) / n;
       posts.push(M4(alongX ? p.x + t : p.x, y + H / 2 + 2, alongX ? p.z : p.z + t, 0, 1, H + 4, 1));
     }
-    // ROOFTOP LOOP: a red line along the fences that look into the lane court.
-    const inCourt = (x: number, z: number) => x > LOOP_COURT.x0 && x < LOOP_COURT.x1 && z > LOOP_COURT.z0 && z < LOOP_COURT.z1;
-    const nearCourt = alongX ? inCourt(p.x, p.z + 8) || inCourt(p.x, p.z - 8) : inCourt(p.x + 8, p.z) || inCourt(p.x - 8, p.z);
-    const courtEdge = alongX ? Math.abs(p.z - LOOP_COURT.z0) < 20 || Math.abs(p.z - LOOP_COURT.z1) < 70 : Math.abs(p.x - LOOP_COURT.x0) < 12 || Math.abs(p.x - LOOP_COURT.x1) < 12;
-    if (nearCourt && courtEdge && y > 150) red.push(tint(boxAt(alongX ? len : 2, 2.5, alongX ? 2 : len, p.x, y + H + 5, p.z), RED));
+    if (loop) red.push(tint(boxAt(alongX ? len : 2, 2.5, alongX ? 2 : len, p.x, y + H + 5, p.z), RED));
     fencePanels++;
   };
   for (const p of WORLD) {
@@ -502,6 +568,34 @@ export function buildIkebukuro(scene: THREE.Scene): IkebukuroStats {
         solid.push(tint(boxAt(tw, 6, td, tx, k.y + 6, tz), 0x7c838d));
       }
       glow.push(tint(boxAt(w - 20, 2, 2, cx, k.y - 1, k.z0 + 1), VIOLET), tint(boxAt(w - 20, 2, 2, cx, k.y - 1, k.z1 - 1), VIOLET));
+      // Floor paint (no glow): a dashed ring round the relay cabinet, dashed lines out to every
+      // way in, a walkway border and small violet arrows pointing in, so the deck reads as the node.
+      const cab = IKB_PLANT.find((q) => q.id === 'hub.cab')!;
+      const hx = (cab.x0 + cab.x1) / 2, hz = (cab.z0 + cab.z1) / 2, R = 56, py = k.y + 0.4, PAINT = 0xd9dde3;
+      for (let i = 0; i < 28; i++) {
+        const a = (i / 28) * Math.PI * 2;
+        ground.push(tint(new THREE.PlaneGeometry(8, 4).rotateX(-Math.PI / 2).rotateY(-a).translate(hx + Math.sin(a) * R, py, hz + Math.cos(a) * R), PAINT));
+      }
+      const dash = (x0: number, z0: number, x1: number, z1: number) => {
+        const len = Math.hypot(x1 - x0, z1 - z0), n = Math.floor(len / 24), alongX = Math.abs(x1 - x0) > 1;
+        for (let i = 0; i < n; i++) {
+          const t = (i + 0.5) / n;
+          ground.push(tint(flat(alongX ? 14 : 4, alongX ? 4 : 14, x0 + (x1 - x0) * t, py, z0 + (z1 - z0) * t), PAINT));
+        }
+      };
+      dash(k.x0 + 6, hz, hx - R - 6, hz); dash(hx + R + 6, hz, k.x1 - 6, hz);
+      dash(hx, k.z0 + 6, hx, hz - R - 6); dash(hx, hz + R + 6, hx, k.z1 - 6);
+      for (const [x0, z0, x1, z1] of [[k.x0 + 4, k.z0 + 4, k.x1 - 4, k.z0 + 4], [k.x0 + 4, k.z1 - 4, k.x1 - 4, k.z1 - 4], [k.x0 + 4, k.z0 + 4, k.x0 + 4, k.z1 - 4], [k.x1 - 4, k.z0 + 4, k.x1 - 4, k.z1 - 4]]) {
+        const alongX = z0 === z1;
+        ground.push(tint(flat(alongX ? x1 - x0 : 3, alongX ? 3 : z1 - z0, (x0 + x1) / 2, py, (z0 + z1) / 2), 0x9aa1ab));
+      }
+      for (const [ax, az, ang] of [[k.x0 + 26, hz, Math.PI / 2], [k.x1 - 26, hz, -Math.PI / 2], [hx, k.z0 + 26, 0], [hx, k.z1 - 26, Math.PI]] as const) {
+        const tri = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-9, 0, -6), new THREE.Vector3(0, 0, 10), new THREE.Vector3(9, 0, -6)]);
+        tri.setIndex([0, 1, 2]);
+        tri.computeVertexNormals();
+        tri.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 2));
+        ground.push(tint(tri.rotateY(ang).translate(ax, py + 0.1, az), 0x7a5fc8));
+      }
       pool(cx, cz, 120, VIOLET, CURB + 0.6);
     }
   }
@@ -543,6 +637,15 @@ export function buildIkebukuro(scene: THREE.Scene): IkebukuroStats {
         // Antenna cluster and a red beacon on the hub cabinet.
         for (const [ox, oz, mh] of [[-18, -18, 120], [16, 12, 90], [-6, 20, 70]]) { masts.push(M4(cx + ox, top + mh / 2, cz + oz, 0, 1, mh, 1)); beacons.push(M4(cx + ox, top + mh + 3, cz + oz)); }
         dishes.push(M4(cx + 18, top + 60, cz - 12, 2.2));
+        // Relay rack: a steel frame round the cabinet carrying three white sector antennas, so the
+        // hub has its own outline over the roof line (no bigger than the cabinet's footprint).
+        const fx = w / 2 + 5, fz = d / 2 + 5, fy = top + 34;
+        for (const [ox, oz] of [[-fx, -fz], [fx, -fz], [-fx, fz], [fx, fz]]) solid.push(tint(boxAt(4, fy - q.y, 4, cx + ox, (q.y + fy) / 2, cz + oz), STEEL));
+        for (const oz of [-fz, fz]) solid.push(tint(boxAt(2 * fx + 4, 4, 4, cx, fy, cz + oz), STEEL));
+        for (const ox of [-fx, fx]) solid.push(tint(boxAt(4, 4, 2 * fz + 4, cx + ox, fy, cz), STEEL));
+        for (const [ox, oz, nx, nz] of [[-fx - 4, 8, -1, 0], [fx + 4, -8, 1, 0], [6, -fz - 4, 0, -1]] as const) {
+          white.push(tint(boxAt(nx ? 5 : 12, 30, nz ? 5 : 12, cx + ox, fy - 4, cz + oz), 0xe9ecf0));
+        }
       } else {
         glow.push(tint(boxAt(Math.min(w, d) * 0.4, 3, 1.2, cx, q.y + q.h - 12, q.z0 - 0.7), VIOLET));
         vents.push(M4(cx, top + 9, cz));
@@ -586,7 +689,7 @@ export function buildIkebukuro(scene: THREE.Scene): IkebukuroStats {
   // ------------------------------------------------------------ signs on the street
   const wayAt = (i: number, x: number, y: number, z: number, nx: number, nz: number, w = 96) => {
     const h = i < 4 ? w * 0.31 : w * 0.19;
-    const cell: Cell = i < 4 ? CELLS.way(i) : [512 + ((i - 4) % 2) * 256, 576 + Math.floor((i - 4) / 2) * 48, 256, 48];
+    const cell: Cell = i < 4 ? CELLS.way(i) : way4(i);
     lit.push(quad(w, h, cell, x + nx * 1.5, y, z + nz * 1.5, nx, nz));
     solid.push(tint(boxAt(nx ? 2 : w + 4, h + 4, nx ? w + 4 : 2, x, y, z), FRAME));
   };
@@ -781,7 +884,7 @@ export function buildIkebukuro(scene: THREE.Scene): IkebukuroStats {
   const beaconMat = new THREE.MeshBasicMaterial({ color: RED });
   NIGHT_GLOW.push({ set: (k) => { beaconMat.color.setHex(RED).multiplyScalar(0.7 + 0.3 * k); } });
   inst(new THREE.SphereGeometry(3, 8, 6), beaconMat, beacons, false);
-  return { buildings: all.length, meshes, instanced, triangles: Math.round(tris), treads: treadCount, fencePanels, lamps };
+  return { buildings: all.length, meshes, instanced, triangles: Math.round(tris), treads: treadCount, fencePanels, parapets, lamps };
 }
 
 /** For tests and tools: the square stays clear of anything drawn at ground level. */

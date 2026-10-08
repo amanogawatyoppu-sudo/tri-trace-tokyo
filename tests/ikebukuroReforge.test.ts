@@ -225,6 +225,7 @@ describe('Ikebukuro reforge: as drawn', () => {
       expect(stats.buildings).toBe(IKEBUKURO_BUILT.buildings.length);
       expect(stats.treads).toBeGreaterThan(50);
       expect(stats.fencePanels).toBeGreaterThan(20);
+      expect(stats.parapets).toBeGreaterThan(8); // ordinary roof edges drawn as parapets (collision unchanged)
       expect(stats.lamps).toBeGreaterThanOrEqual(1);
     } finally { g.document = had; }
   });
