@@ -1,4 +1,8 @@
 import type { Point } from './nations';
+import {
+  HALO_SCREEN, MAZE, MAZE_BUILDINGS, MAZE_GATE, MAZE_MAP, SHIBUYA_BUILDINGS, SHIBUYA_LAMPS, SHIBUYA_ZONES, SKY_DECKS, SKY_H, SKY_LEGS, SKY_STAIRS, SUBWAY,
+} from './shibuya';
+import type { ShibuyaBuilding } from './shibuya';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -627,6 +631,8 @@ export interface Building {
   seed: number;
   /** Beyond the tracks: scenery only. */
   outside: boolean;
+  /** Drawn by its district's own renderer (v10: the rebuilt centre of Shibuya), not the generic city. */
+  custom?: 'shibuya';
 }
 export interface StreetSeg { x: number; z: number; w: number; d: number; axis: 'x' | 'z'; kind: StreetKind }
 export interface Block { x0: number; z0: number; x1: number; z1: number; sides: Record<Side, StreetKind> }
@@ -640,7 +646,8 @@ export const PARKINGS: { x: number; z: number; w: number; d: number; axis: 'x' |
 /** Utility poles (電柱) and the wires between them, street lights and traffic signals. */
 export const POLES: Point[] = [];
 export const WIRES: [number, number][] = [];
-export const LIGHTS: (Point & { ang: number })[] = [];
+/** Street lights; `wall` lamps hang on a façade (no pole). */
+export const LIGHTS: (Point & { ang: number; wall?: boolean })[] = [];
 export const SIGNALS: (Point & { ang: number })[] = [];
 /** Zebra crossings: rectangles striped across `axis` (the direction people walk). */
 export const CROSSWALKS: { x: number; z: number; w: number; d: number; axis: 'x' | 'z' }[] = [];
@@ -907,6 +914,114 @@ const furnitureOut: Rect[] = [];
   }
 }
 
+// ---------------------------------------------------------------- 渋谷 NEON MAZE (v10 MAP REFORGE, the Golden Sector)
+/**
+ * The centre of Shibuya is rebuilt by hand (config/shibuya.ts) after the generated city, so
+ * the rest of Tokyo is untouched: the generated buildings, poles, cars, vending machines,
+ * trees, lamps and parking in the rebuilt area are taken out and the new streets, buildings,
+ * lanes, decks and stairs put in. The sidewalk blocks, the scramble's crossings, the
+ * footbridge and the avenue grid stay; the avenue now runs on south through the crossing.
+ */
+export const SHIBUYA_BUILT: { buildings: (ShibuyaBuilding & { h: number })[] } = { buildings: [] };
+{
+  const inZone = (x: number, z: number) => SHIBUYA_ZONES.some((r) => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1);
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (!inZone(p.x, p.z)) continue;
+    // The generated city, and the old stand-in tower that blocked the avenue south of the crossing.
+    if ((GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car')) || p.group === 'tower') prims.splice(i, 1);
+  }
+  const keep = <T extends Point>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  keep(BUILDINGS, (b) => b.outside || !inZone(b.x, b.z));
+  keep(PARKINGS, (k) => !inZone(k.x, k.z));
+  keep(LIGHTS, (l) => !inZone(l.x, l.z));
+  keep(SIGNALS, (l) => !inZone(l.x, l.z));
+  // Poles: drop those in the area and re-link the wires between the ones that stay.
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (!inZone(p.x, p.z)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+  // The side street west of the crossing becomes the station square (pedestrians only).
+  keep(STREET_SEGS, (g) => !(g.kind !== 'avenue' && g.axis === 'x' && g.x < -2890 && Math.abs(g.z - 1899) < 10));
+  // The avenue, unbroken through the crossing (the old tower stood on it).
+  STREET_SEGS.push({ x: -2700, z: (2019 + 2692) / 2, w: AVENUE_W, d: 2692 - 2019, axis: 'z', kind: 'avenue' });
+
+  // Buildings: hand-placed ones and the back-alley maze (one building per letter of the map).
+  const all: ShibuyaBuilding[] = [...SHIBUYA_BUILDINGS];
+  for (const id of Object.keys(MAZE_BUILDINGS)) {
+    let c0 = Infinity, c1 = -1, r0 = Infinity, r1 = -1;
+    MAZE_MAP.forEach((row, r) => [...row].forEach((ch, c) => {
+      if (ch !== id) return;
+      c0 = Math.min(c0, c); c1 = Math.max(c1, c); r0 = Math.min(r0, r); r1 = Math.max(r1, r);
+    }));
+    const { cell, x0, z0 } = MAZE;
+    all.push({ id, x0: x0 + c0 * cell, x1: x0 + (c1 + 1) * cell, z0: z0 + r0 * cell, z1: z0 + (r1 + 1) * cell, ...MAZE_BUILDINGS[id] });
+  }
+  const rnd = prng(1010);
+  for (const b of all) {
+    const h = floorsToHeight(b.floors), x = (b.x0 + b.x1) / 2, z = (b.z0 + b.z1) / 2, w = b.x1 - b.x0, d = b.z1 - b.z0;
+    box(x, z, w, d, h, 'bldg', { noFloor: true });
+    BUILDINGS.push({ x, z, w, d, h, type: b.floors >= 12 ? 'tower' : b.floors <= 3 ? 'shop' : 'mixed', floors: b.floors, district: 'commercial', front: b.fronts[0], seed: Math.floor(rnd() * 1e9), outside: false, custom: 'shibuya' });
+    SHIBUYA_BUILT.buildings.push({ ...b, h });
+  }
+
+  // SKY RING: decks with railings, columns, and stairs. Railings stop where a stair or deck joins.
+  const RAIL = 6, RAIL_H = 32, id = 'skyway';
+  for (const k of SKY_DECKS) slab((k.x0 + k.x1) / 2, (k.z0 + k.z1) / 2, k.x1 - k.x0, k.z1 - k.z0, SKY_H, 'metal', id);
+  const covered = (x: number, z: number) => SKY_DECKS.some((k) => x > k.x0 - 1 && x < k.x1 + 1 && z > k.z0 - 1 && z < k.z1 + 1)
+    || SKY_STAIRS.some((s) => x > s.x0 - 1 && x < s.x1 + 1 && z > s.z0 - 1 && z < s.z1 + 1)
+    || SHIBUYA_BUILT.buildings.some((b) => x > b.x0 - 1 && x < b.x1 + 1 && z > b.z0 - 1 && z < b.z1 + 1);
+  // Walk each deck edge in short steps; a step whose outside is open gets a railing piece (merged into runs).
+  for (const k of SKY_DECKS) {
+    const edges: [number, number, number, number, number, number][] = [
+      [k.x0, k.z0, k.x1, k.z0, 0, -1], [k.x0, k.z1, k.x1, k.z1, 0, 1], [k.x0, k.z0, k.x0, k.z1, -1, 0], [k.x1, k.z0, k.x1, k.z1, 1, 0],
+    ];
+    for (const [ax, az, bx, bz, nx, nz] of edges) {
+      const len = Math.hypot(bx - ax, bz - az), STEP = 10;
+      let run0 = -1;
+      for (let t = 0; t <= len; t += STEP) {
+        const px = ax + ((bx - ax) * Math.min(t + STEP / 2, len)) / len, pz = az + ((bz - az) * Math.min(t + STEP / 2, len)) / len;
+        const open = t < len && !covered(px + nx * 4, pz + nz * 4);
+        if (open && run0 < 0) run0 = t;
+        if ((!open || t + STEP > len) && run0 >= 0) {
+          const t1 = open ? len : t;
+          const a = run0, L = t1 - a;
+          if (L > 2) {
+            const cx = ax + ((bx - ax) * (a + L / 2)) / len - nx * (RAIL / 2), cz = az + ((bz - az) * (a + L / 2)) / len - nz * (RAIL / 2);
+            box(cx, cz, nx ? RAIL : L, nx ? L : RAIL, SKY_H + RAIL_H, 'metal', { y0: SKY_H, group: id });
+          }
+          run0 = -1;
+        }
+      }
+    }
+  }
+  for (const [x, z] of SKY_LEGS) box(x, z, 24, 24, SKY_H - 12, 'metal', { group: id });
+  for (const s of SKY_STAIRS) ramp((s.x0 + s.x1) / 2, (s.z0 + s.z1) / 2, s.x1 - s.x0, s.z1 - s.z0, s.axis, s.dir, 0, SKY_H, 'stairs', 'metal', id);
+
+  // The NEON MAZE gate posts, and the subway entrance in the square.
+  for (const z of [MAZE_GATE.z0, MAZE_GATE.z1]) box(MAZE_GATE.x, z, 18, 18, MAZE_GATE.top, 'metal', { group: 'shibuya', noFloor: true });
+  // HALO VISION's two legs.
+  for (const dx of [-105, 105]) box(HALO_SCREEN.x + dx, HALO_SCREEN.z + 4, 16, 16, HALO_SCREEN.y, 'metal', { group: 'shibuya', noFloor: true });
+  box((SUBWAY.x0 + SUBWAY.x1) / 2, (SUBWAY.z0 + SUBWAY.z1) / 2, SUBWAY.x1 - SUBWAY.x0, SUBWAY.z1 - SUBWAY.z0, SUBWAY.h, 'concrete', { group: 'shibuya', noFloor: true });
+
+  // Street trees on the avenue's west pavement and round the square; vending machines in the lanes.
+  for (const [x, z] of [[-2945, 2500], [-2945, 2620], [-3250, 2300], [-2930, 2300]]) tree(x, z, 250);
+  for (const [x, z, side] of [[-2380, 2216, 's'], [-2050, 2368, 's'], [-2091, 1330, 'w']] as const) {
+    box(x, z, side === 's' ? 54 : 20, side === 's' ? 20 : 54, 48, 'vending', { noFloor: true, group: side });
+  }
+  for (const l of SHIBUYA_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
+}
+
 export const WORLD: readonly Prim[] = prims;
 
 /** Green and gravel areas painted on the ground (decoration). */
@@ -963,6 +1078,7 @@ export const PERCHES: readonly (Point & { y: number })[] = [
   { x: STADIUM.x, y: STADIUM.H, z: STADIUM.z + 60 - STADIUM.D / 2 + STADIUM.T / 2 },
   { x: WALKUP_KABUKI.terrace.x, y: UPPER, z: WALKUP_KABUKI.terrace.z },
   ...FOOTBRIDGES.map((f) => ({ x: f.x, y: FOOTBRIDGE_H, z: f.z })),
+  { x: -2700, y: SKY_H, z: 1720 }, // 渋谷 SKY RING over the scramble
 ];
 
 /**

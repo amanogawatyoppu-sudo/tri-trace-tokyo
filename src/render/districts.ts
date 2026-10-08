@@ -4,8 +4,7 @@ import type { Building } from '../config/map';
 import { SECTORS, sectorAt } from '../sim/war';
 import { NIGHT_GLOW } from './nightGlow';
 import { DISTRICT_CODES } from '../config/terminology';
-import { artMode } from './artStyle';
-import { SHOWCASE_LIGHTS } from './shibuyaBlock';
+import { SHIBUYA_LIGHTS } from './shibuya';
 
 /**
  * District identity (v9.0, visual only): each of the nine sectors dresses its buildings
@@ -31,7 +30,8 @@ export interface DistrictLook {
 /** By sector id (see SECTORS in sim/war). */
 export const DISTRICT_LOOKS: readonly DistrictLook[] = [
   { palette: [0xffffff, 0xff5a4a, 0x7fd8ff], signs: 1.4, shape: 'strip', crown: 0.85, masts: 0.6 }, // 新宿
-  { palette: [0xff3fa4, 0x34e6ff, 0xb46bff, 0xffe14a], signs: 3.2, shape: 'strip', crown: 0.2, masts: 0.1 }, // 渋谷
+  // 渋谷 (v10 Golden Sector): magenta, violet, mint, rose, white — no faction-like yellow or sky blue.
+  { palette: [...SHIBUYA_LIGHTS], signs: 3.2, shape: 'strip', crown: 0.2, masts: 0.1 }, // 渋谷
   { palette: [0x7dffb0, 0xfff1c0, 0x45c8ff], signs: 1.2, shape: 'band', crown: 0.95, masts: 0.35 }, // 池袋
   { palette: [0xffc27a, 0xfff0d6], signs: 0.35, shape: 'lantern', crown: 0.05, masts: 0 }, // 文京
   { palette: [0xb9ff7a, 0xffd59a], signs: 0.45, shape: 'lantern', crown: 0.1, masts: 0 }, // 上野
@@ -41,13 +41,9 @@ export const DISTRICT_LOOKS: readonly DistrictLook[] = [
   { palette: [0x9ff3ff, 0xffffff, 0x5a8bff], signs: 0.9, shape: 'band', crown: 0.9, masts: 0.3 }, // 品川
 ];
 
-/**
- * v9.2 art prototype: Shibuya's lights without the faction-like yellow and sky blue
- * (magenta, violet, mint, red, white), so a STAR or LUNA player never blends into a sign.
- */
+/** The district's look by sector id. */
 export function lookFor(sector: number): DistrictLook {
-  const l = DISTRICT_LOOKS[sector];
-  return sector === 1 && artMode() !== 'off' ? { ...l, palette: [...SHOWCASE_LIGHTS] } : l;
+  return DISTRICT_LOOKS[sector];
 }
 
 /** The district's codename by sector id. */
@@ -187,7 +183,8 @@ export function buildDistricts(scene: THREE.Scene): DistrictStats {
   // Every building, the skyline beyond the tracks included: the districts read from afar too.
   for (const b of BUILDINGS) {
     const s = sectorAt(b.x, b.z);
-    dressBuilding(b, lookFor(s), prng(b.seed * 7 + 11), lit, masts);
+    // The rebuilt centre of Shibuya carries its own signs (render/shibuya.ts).
+    if (!b.custom) dressBuilding(b, lookFor(s), prng(b.seed * 7 + 11), lit, masts);
   }
   dressCrossings(lit, masts);
   borderStuds(studs);

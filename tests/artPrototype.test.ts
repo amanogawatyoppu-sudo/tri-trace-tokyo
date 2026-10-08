@@ -5,11 +5,10 @@ import type { Human } from '../src/render/humanModel';
 import { buildHumanV2, stripTone } from '../src/render/humanModelV2';
 import { gearReveal } from '../src/render/gearReveal';
 import { NATIONS, NATION_IDS } from '../src/config/nations';
-import { WORLD } from '../src/config/map';
 import type { RoleId } from '../src/config/roles';
 import { ART_CAMERA_DISTANCE, ART_CAMERA_PITCH, artMode, setArtMode } from '../src/render/artStyle';
 import { DIST_MAX, DIST_MIN } from '../src/render/cameraController';
-import { DISTRICT_LOOKS, lookFor } from '../src/render/districts';
+import { lookFor } from '../src/render/districts';
 
 /** v9.2 art prototype: the SOL RUNNER sample body (v2) and the Shibuya showcase block. */
 
@@ -175,56 +174,10 @@ describe('art prototype switches', () => {
     expect(ART_CAMERA_PITCH).toBeLessThan(0.42);
   });
 
-  it('Shibuya\'s lights avoid the faction hues with the prototype on (and are the v9.1 ones without)', () => {
-    expect(lookFor(1)).toBe(DISTRICT_LOOKS[1]);
-    setArtMode('player');
-    try {
-      for (const c of lookFor(1).palette) {
-        const { s } = hue(c);
-        for (const n of NATION_IDS) if (s > 0.3) expect(hueGap(c, NATIONS[n].color), `${c.toString(16)} vs ${n}`).toBeGreaterThan(24);
-      }
-    } finally { setArtMode('off'); }
-  });
-});
-
-describe('Shibuya showcase block (NEON MAZE)', () => {
-  /** Just enough of a 2D canvas for the atlas painter (node has none). */
-  function fakeDocument() {
-    const ctx: Record<string, unknown> = new Proxy({}, {
-      get: (t, k) => (k in t ? (t as Record<string | symbol, unknown>)[k] : k === 'createLinearGradient' ? () => ({ addColorStop: () => {} }) : () => {}),
-      set: (t, k, v) => { (t as Record<string | symbol, unknown>)[k] = v; return true; },
-    });
-    return { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) };
-  }
-
-  it('is scenery only: few draw calls, a light triangle budget, no change to the world (collision, navigation, stairs)', async () => {
-    const g = globalThis as unknown as { document?: unknown };
-    const had = g.document;
-    g.document = fakeDocument();
-    try {
-      const before = JSON.stringify(WORLD);
-      const { buildShibuyaBlock, showcaseFaces, SHOWCASE } = await import('../src/render/shibuyaBlock');
-      const scene = new THREE.Scene();
-      const stats = buildShibuyaBlock(scene);
-      expect(JSON.stringify(WORLD)).toBe(before);
-      const meshes = scene.children.filter((o) => (o as THREE.Mesh).isMesh);
-      expect(meshes.length).toBe(scene.children.length);
-      expect(meshes.length).toBeLessThanOrEqual(5);
-      expect(stats.triangles).toBeLessThan(25000);
-      expect(stats.faces).toBeGreaterThanOrEqual(5);
-      expect(stats.bays).toBeGreaterThanOrEqual(20);
-      expect(stats.arches).toBeGreaterThan(4);
-      // Everything sits around the crossing (and the arches under the nearby tracks).
-      for (const f of showcaseFaces()) expect(Math.hypot((f.x0 + f.x1) / 2 - SHOWCASE.x, (f.z0 + f.z1) / 2 - SHOWCASE.z)).toBeLessThan(1100);
-    } finally { g.document = had; }
-  });
-
-  it('its sign and screen colours never use a faction hue', async () => {
-    const { SHOWCASE_LIGHTS } = await import('../src/render/shibuyaBlock');
-    for (const c of SHOWCASE_LIGHTS) {
+  it('Shibuya\'s lights avoid the faction hues (v10: always, not only with the prototype)', () => {
+    for (const c of lookFor(1).palette) {
       const { s } = hue(c);
-      if (s < 0.3) continue; // whites
-      for (const n of NATION_IDS) expect(hueGap(c, NATIONS[n].color), `${c.toString(16)} vs ${n}`).toBeGreaterThan(24);
+      for (const n of NATION_IDS) if (s > 0.3) expect(hueGap(c, NATIONS[n].color), `${c.toString(16)} vs ${n}`).toBeGreaterThan(24);
     }
   });
 });
