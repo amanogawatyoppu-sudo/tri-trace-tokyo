@@ -95,7 +95,7 @@ export const LANE_BUILDINGS: Record<string, Omit<ShinjukuBuilding, 'id' | 'x0' |
 
 /** Towers and the other buildings. */
 export const SHINJUKU_BUILDINGS: readonly ShinjukuBuilding[] = [
-  // T1: north-east corner of the VERTICAL CROSS (PILLAR VISION stands at its foot).
+  // T1: north-east corner of the VERTICAL CROSS (the VERTICAL CORE rises up its corner).
   { id: 'T1', x0: -2420, z0: -1990, x1: -2200, z1: -1630, floors: 28, fronts: ['w', 's', 'e'], skin: 'glass', service: 'n',
     tower: { podium: 281, shaft: { x0: -2400, z0: -1960, x1: -2220, z1: -1650 }, walkRoof: false } },
   // T1b: low block north of T1, by the deck's north stair.
@@ -143,10 +143,11 @@ export const DECK_LEGS: readonly [number, number][] = [
 export const LANES_GATE = { z: -1800, x0: -3412, x1: -3312, top: 210, sign: [150, 200] as const };
 
 /**
- * PILLAR VISION: a vertical LED column wrapped round T1's south-west corner, facing the crossing
- * (south over 靖国通り and west over the avenue). It starts above DECK 2's railing.
+ * VERTICAL CORE: a lit glass shaft set into T1's south-west corner, from the street to above the
+ * roof, ringed at every storey and marked at DECK 2 and the high level. It leads the eye from the
+ * crossing up the tower. Drawn only (it stands inside T1's footprint, so it changes no route).
  */
-export const PILLAR = { x: -2420, z: -1630, w: 64, y0: 180, y1: 560 };
+export const VERTICAL_CORE = { x0: -2424, z0: -1712, x1: -2342, z1: -1626, spire: 260 };
 
 /** Street lamps in the rebuilt area (gameplay lamps). */
 export const SHINJUKU_LAMPS: readonly { x: number; z: number; ang: number; wall?: boolean }[] = [
@@ -160,5 +161,10 @@ export const SHINJUKU_LAMPS: readonly { x: number; z: number; ang: number; wall?
   { x: -3300, z: -1806, ang: -Math.PI / 2, wall: true },
 ];
 
-/** Shinjuku's light colours: white, cold cyan, violet, crimson (≥ 24° from every faction hue; see tests). */
-export const SHINJUKU_LIGHTS = [0xf2f6ff, 0x6ef2f0, 0x9a7bff, 0xff3b5c] as const;
+/**
+ * Shinjuku's light colours: white, glass blue, grey, and a crimson accent (kept for the NIGHT
+ * LANES gate). The architecture is what lights up here, not advertising (渋谷 = signs, 新宿 =
+ * buildings). Saturated colours stay ≥ 24° from every faction hue (see tests); glass blue and grey
+ * are too pale to read as a faction.
+ */
+export const SHINJUKU_LIGHTS = [0xf2f6ff, 0xb8d4e6, 0xd6dbe3, 0xff3b5c] as const;

@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { BoxPrim, RampPrim } from '../config/map';
 import { CURB, GROUND_FLOOR, LOOP, SHINJUKU_BUILT, STATIONS, STOREY, VIADUCT, WORLD, insideLoop, prng } from '../config/map';
 import type { ShinjukuBuilding, ShinjukuSide } from '../config/shinjuku';
-import { DECKS, DECK_H, DECK_LEGS, HIGH_DECKS, HIGH_H, LANES, LANES_GATE, LANES_MAP, PILLAR, SHINJUKU_CROSS, SHINJUKU_LIGHTS } from '../config/shinjuku';
+import { DECKS, DECK_H, DECK_LEGS, HIGH_DECKS, HIGH_H, LANES, LANES_GATE, LANES_MAP, SHINJUKU_CROSS, SHINJUKU_LIGHTS, SHINJUKU_STAIRS, VERTICAL_CORE } from '../config/shinjuku';
 import { NIGHT_GLOW, glowAtNight } from './nightGlow';
 import { nearFade } from './city';
 import { radialGlowTexture, sharedFacadeTexture } from './textures';
@@ -14,16 +14,20 @@ import type { Face } from './shibuya';
 /**
  * v10.1 MAP REFORGE — 新宿 VERTICAL CITY, as drawn (the Shibuya method, Shinjuku's own look).
  *
+ * 渋谷 = the signs light up; 新宿 = the buildings light up. Light is white, grey, glass blue and
+ * office light; advertising neon is kept low and the one crimson accent is the NIGHT LANES gate.
  * - Towers: a podium of shops (street level, and a second row of shops at DECK 2 level where the
- *   deck runs along it), then the glass shaft with office light in bands of storeys, white and
- *   cyan light lines running up the corners and the mullion fins, a lit crown and red aviation
- *   lights. The skyline reads vertical by day and by night.
- * - NIGHT LANES: low 雑居ビル, every front stacked with blade signs, lanterns over the lanes.
- * - DECK 2 and the SKY BRIDGE: paved decks with posted glass railings, girders, deck lamps,
- *   light lines under the edges; the bridge carries the VERTICAL GATE fascia.
- * - PILLAR VISION, the NIGHT LANES gate, the base square's granite, the railway arches.
+ *   deck runs along it), then the glass shaft with office light in bands of storeys, white light
+ *   lines up the corners, glass-blue fins, a lit floor line every five storeys, a lit crown and
+ *   red aviation lights. The skyline reads vertical by day and by night.
+ * - The VERTICAL CORE: a lit glass shaft up T1's corner from the street to above the roof.
+ * - NIGHT LANES: low 雑居ビル with stacked blade signs (white and grey), paper lanterns.
+ * - Decks in three weights: the main DECK 2 (deep girders), the link along the square (light),
+ *   the SKY BRIDGE (a thin slab, so the sky and the towers show between the levels).
+ * - Level signs at every stair (GROUND / DECK 2 / SKY BRIDGE and where the stair goes).
+ * - The NIGHT LANES gate, the base square's granite, the railway arches.
  * Small repeated pieces are instanced; everything else is merged per material (one atlas for
- * every sign and screen). Light colours are Shinjuku's own (white, cold cyan, violet, crimson).
+ * every sign and screen).
  */
 
 const ATLAS = 1024;
@@ -36,7 +40,7 @@ const CELLS = {
   swatch: (i: number): Cell => [512 + i * 64 + 8, 584, 48, 16],
   ticker: [512, 608, 512, 64] as Cell,
   screen: (i: number): Cell => [i * 512, 672, 512, 160],
-  pillar: [0, 832, 128, 192] as Cell,
+  level: (i: number): Cell => [0, 832 + i * 48, 128, 48],
   gate: [128, 832, 512, 96] as Cell,
   bridge: [128, 928, 512, 48] as Cell,
   deck: [128, 976, 512, 48] as Cell,
@@ -104,13 +108,14 @@ function atlas(): THREE.CanvasTexture {
   // Blade signs (縦看板): white, crimson, cyan grounds; the lanes' main motif.
   BLADES.forEach((wd, i) => {
     const [x, y, w, h] = CELLS.blade(i);
-    const ground = [0xf2f6ff, 0xff3b5c, 0x14161b, 0x6ef2f0][i % 4];
+    // White, grey, black and glass-blue grounds: lit boxes, not neon.
+    const ground = [0xf2f6ff, 0xd6dbe3, 0x14161b, 0xb8d4e6][i % 4];
     g.fillStyle = css(ground);
     g.fillRect(x, y, w, h);
-    g.strokeStyle = i % 4 === 2 ? css(0xff3b5c) : 'rgba(20,22,27,.8)';
+    g.strokeStyle = i % 4 === 2 ? 'rgba(242,246,255,.8)' : 'rgba(20,22,27,.8)';
     g.lineWidth = 4;
     g.strokeRect(x + 4, y + 4, w - 8, h - 8);
-    const ink = i % 4 === 2 ? '#ffffff' : i % 4 === 1 ? '#ffffff' : '#14161b';
+    const ink = i % 4 === 2 ? '#ffffff' : '#14161b';
     const chars = wd === 'BAR' ? ['B', 'A', 'R'] : [...wd];
     const n = chars.length, step = Math.min(56, 224 / n);
     chars.forEach((ch, k) => text(ch, x + w / 2, y + h / 2 + (k - (n - 1) / 2) * step, 42, ink, 'center', '900'));
@@ -120,22 +125,24 @@ function atlas(): THREE.CanvasTexture {
     const [x, y, w, h] = CELLS.way(i);
     g.fillStyle = '#f2f4f7'; g.fillRect(x, y, w, h);
     g.fillStyle = '#16181d'; g.fillRect(x, y, 66, h);
-    text(arrow, x + 33, y + h / 2 + 2, 50, css(i === 1 ? 0xff3b5c : 0x6ef2f0), 'center', '900');
+    text(arrow, x + 33, y + h / 2 + 2, 50, '#f2f6ff', 'center', '900');
     text(jp, x + 80, y + 28, 28, '#15171c', 'left', '900');
     text(en, x + 80, y + 60, 19, '#3a3d45', 'left', '700');
   });
   L.forEach((col, i) => { const [x, y, w, h] = CELLS.swatch(i); g.fillStyle = css(col); g.fillRect(x - 8, y - 8, w + 16, h + 16); });
   {
     const [x, y, w, h] = CELLS.ticker;
-    g.fillStyle = '#0b0c12'; g.fillRect(x, y, w, h);
-    text('VERTICAL CITY ・ 新宿 ・ LAST TRAIN 0:42 ・ 新宿 ・', x + w / 2, y + h / 2, 28, css(0x6ef2f0), 'center', '800');
+    // The VERTICAL CORE's name plate.
+    g.fillStyle = '#10131a'; g.fillRect(x, y, w, h);
+    g.fillStyle = css(0xb8d4e6); g.fillRect(x, y + h - 6, w, 6);
+    text('VERTICAL CORE  ・  新宿', x + w / 2, y + h / 2 - 2, 38, '#ffffff', 'center', '900');
   }
   // Big screens: invented motion graphics (vertical light, skyline).
   for (let i = 0; i < 2; i++) {
     const [x, y, w, h] = CELLS.screen(i);
     const grd = g.createLinearGradient(x, y, x + w, y + h);
-    grd.addColorStop(0, i ? '#1c1440' : '#0e2a3a');
-    grd.addColorStop(1, i ? '#3a0f2a' : '#14183c');
+    grd.addColorStop(0, i ? '#1b1f28' : '#101824');
+    grd.addColorStop(1, i ? '#2b303a' : '#1a222e');
     g.fillStyle = grd; g.fillRect(x, y, w, h);
     for (let k = 0; k < 22; k++) {
       const bx = x + 10 + k * 23, bh = 30 + rnd() * (h - 50);
@@ -144,35 +151,37 @@ function atlas(): THREE.CanvasTexture {
     }
     if (i === 0) {
       text('VERTICAL', x + 30, y + 60, 64, '#ffffff', 'left', '900');
-      text('CITY  新宿', x + 34, y + 120, 40, css(0x6ef2f0), 'left', '900');
+      text('CITY  新宿', x + 34, y + 120, 40, css(0xb8d4e6), 'left', '900');
     } else {
       text('UP', x + 40, y + 74, 84, '#ffffff', 'left', '900');
-      text('RUN THE TOWERS', x + 44, y + 130, 30, css(0x9a7bff), 'left', '900');
+      text('RUN THE TOWERS', x + 44, y + 130, 30, css(0xd6dbe3), 'left', '900');
     }
     g.fillStyle = 'rgba(0,0,0,.1)';
     for (let r = 0; r < h; r += 4) g.fillRect(x, y + r, w, 1);
   }
-  // PILLAR VISION: a tall column of stacked light (seen stretched over ≈ 15 m).
-  {
-    const [x, y, w, h] = CELLS.pillar;
-    const grd = g.createLinearGradient(x, y, x, y + h);
-    grd.addColorStop(0, '#6a4bd8'); grd.addColorStop(0.5, '#1f8f9a'); grd.addColorStop(1, '#a52a52');
-    g.fillStyle = grd; g.fillRect(x, y, w, h);
-    for (let k = 0; k < 12; k++) { g.fillStyle = css(L[k % 4], 0.55); g.fillRect(x + 8, y + 6 + k * 15.5, w - 16, 7); }
-    text('新', x + w / 2, y + 48, 60, '#ffffff', 'center', '900');
-    text('宿', x + w / 2, y + 136, 60, '#ffffff', 'center', '900');
-  }
+  // Level signs: where you are (top line) and where this stair goes (bottom line).
+  const LEVELS: [string, string, number][] = [
+    ['GROUND 地上', '▲ DECK 2', 0xf2f6ff], ['DECK 2 2F', '▲ SKY BRIDGE', 0xb8d4e6],
+    ['DECK 2 2F', '▼ GROUND', 0xb8d4e6], ['SKY BRIDGE 高所', '▼ DECK 2', 0xf2f6ff],
+  ];
+  LEVELS.forEach(([here, to, col], i) => {
+    const [x, y, w, h] = CELLS.level(i);
+    g.fillStyle = '#12151b'; g.fillRect(x, y, w, h);
+    g.fillStyle = css(col); g.fillRect(x, y, 6, h);
+    text(here, x + 12, y + 13, 14, '#aab2bd', 'left', '800');
+    text(to, x + 12, y + 33, 20, css(col), 'left', '900');
+  });
   {
     const [x, y, w, h] = CELLS.gate;
     g.fillStyle = '#0c0b10'; g.fillRect(x, y, w, h);
-    g.strokeStyle = css(0xff3b5c); g.lineWidth = 6; g.strokeRect(x + 6, y + 6, w - 12, h - 12);
+    g.strokeStyle = '#e8ecf2'; g.lineWidth = 4; g.strokeRect(x + 6, y + 6, w - 12, h - 12);
     text('NIGHT LANES', x + 200, y + h / 2, 52, '#ffffff', 'center', '900');
     text('夜の横丁', x + 420, y + h / 2 + 2, 44, css(0xff3b5c), 'center', '900');
   }
-  for (const [cell, label, col] of [[CELLS.bridge, 'VERTICAL GATE ・ 新宿 ・ SKY BRIDGE ・', 0x6ef2f0], [CELLS.deck, 'DECK 2 ・ 新宿 ・ 2F デッキ ・', 0xf2f6ff]] as const) {
+  for (const [cell, label, col] of [[CELLS.bridge, 'VERTICAL GATE ・ 新宿 ・ SKY BRIDGE ・', 0xf2f6ff], [CELLS.deck, 'DECK 2 ・ 新宿 ・ 2F デッキ ・', 0xb8d4e6]] as const) {
     const [x, y, w, h] = cell;
     const grd = g.createLinearGradient(x, y, x + w, y);
-    grd.addColorStop(0, '#0d1a26'); grd.addColorStop(0.5, '#161433'); grd.addColorStop(1, '#0d1a26');
+    grd.addColorStop(0, '#141820'); grd.addColorStop(0.5, '#1c212a'); grd.addColorStop(1, '#141820');
     g.fillStyle = grd; g.fillRect(x, y, w, h);
     text(label, x + w / 2, y + h / 2 + 2, 28, css(col), 'center', '900');
   }
@@ -184,7 +193,7 @@ function atlas(): THREE.CanvasTexture {
     const grd = g.createLinearGradient(x, y + 24, x, y + h);
     grd.addColorStop(0, i === 1 ? '#dde8ef' : '#ffe4c0'); grd.addColorStop(1, i === 1 ? '#7a868c' : '#8a6448');
     g.fillStyle = grd; g.fillRect(x + 6, y + 26, w - 12, h - 26);
-    g.fillStyle = css(i === 1 ? 0x6ef2f0 : 0xff3b5c); g.fillRect(x + 10, y + 8, w - 20, 12);
+    g.fillStyle = css(i === 1 ? 0xb8d4e6 : 0xfff1dc); g.fillRect(x + 10, y + 8, w - 20, 12);
   }
   FLOORS.forEach((f, i) => {
     const [x, y, w, h] = CELLS.floor(i);
@@ -218,7 +227,9 @@ const SKIN: Record<ShinjukuBuilding['skin'], { tex: FacadeKind; tint: number }> 
 };
 /** Office light: cool and warm whites (no faction hue). */
 const OFFICE = [0xeaf3ff, 0xdfeaff, 0xfff4e4, 0xf4f8ff];
-/** Signs are lit in three levels (as Shibuya): hero (PILLAR VISION, the gate fascia, the lanes gate), support, background. */
+/** Shop-front light pools: warm and cool white (no colour on the ground). */
+const SHOP_LIGHT = [0xfff1dc, 0xf2f6ff];
+/** Signs are lit in three levels (as Shibuya): hero (the VERTICAL CORE, the gate fascia, the lanes gate), support, background. */
 
 export interface ShinjukuStats { buildings: number; bays: number; meshes: number; instanced: number; triangles: number }
 
@@ -226,7 +237,7 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
   const L = SHINJUKU_LIGHTS;
   const hero: THREE.BufferGeometry[] = [], lit: THREE.BufferGeometry[] = [], back: THREE.BufferGeometry[] = [], win: THREE.BufferGeometry[] = [];
   const glass: THREE.BufferGeometry[] = [], solid: THREE.BufferGeometry[] = [], glow: THREE.BufferGeometry[] = [], ground: THREE.BufferGeometry[] = [];
-  const pools: THREE.BufferGeometry[] = [], arches: THREE.BufferGeometry[] = [];
+  const pools: THREE.BufferGeometry[] = [], arches: THREE.BufferGeometry[] = [], core: THREE.BufferGeometry[] = [], coreLight: THREE.BufferGeometry[] = [];
   const skins: Record<string, THREE.BufferGeometry[]> = {};
   const acs: THREE.Matrix4[] = [], tanks: THREE.Matrix4[] = [], pipes: THREE.Matrix4[] = [], lanterns: THREE.Matrix4[] = [], bollards: THREE.Matrix4[] = [], planters: THREE.Matrix4[] = [];
   const M4 = (x: number, y: number, z: number, ry = 0, sx = 1, sy = 1, sz = 1) =>
@@ -268,7 +279,7 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
         solid.push(tint(new THREE.BoxGeometry(bw - 12, 1.6, 26).rotateX(0.38).rotateY(ang).translate(ax, y + GF - 30, az), AWNING[Math.floor(br() * AWNING.length)]));
       }
       const [px, pz] = along(f, s, 40);
-      pool(px, pz, 44, L[Math.floor(br() * 4)], y + (y > 0 ? 0.9 : CURB + 0.6));
+      pool(px, pz, 44, SHOP_LIGHT[Math.floor(br() * 2)], y + (y > 0 ? 0.9 : CURB + 0.6));
       bays++;
     }
     for (let k = 0; k <= n; k++) {
@@ -431,7 +442,12 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
       }
       // Crown: a lit band near the top, and a setback ring.
       const [mx, mz] = along(f, f.len / 2, 1.5);
-      glow.push(tint(quad(f.len, 12, CELLS.swatch(0), mx, top - 40, mz, f.nx, f.nz), b.id === 'T2' ? 0x9a7bff : 0xf2f6ff));
+      glow.push(tint(quad(f.len, 12, CELLS.swatch(0), mx, top - 40, mz, f.nx, f.nz), b.id === 'T2' ? L[1] : 0xf2f6ff));
+      // The building lights up, not its signs: a lit floor line every five storeys.
+      for (let y = podTop + 5 * STOREY; y < top - 2 * STOREY; y += 5 * STOREY) {
+        const [lx, lz] = along(f, f.len / 2, 2.2);
+        glow.push(tint(quad(f.len - 4, 2.5, CELLS.swatch(0), lx, y, lz, f.nx, f.nz), 0xdfe8f2));
+      }
       solid.push(tint(boxAt(f.len + 8, 8, 8, ...along(f, f.len / 2, 2).flatMap((v, i) => (i === 0 ? [v, top - 70] : [v])) as [number, number, number], ang), 0x5c6470));
     }
     // Roof: parapet, a helipad square on the tallest, aviation lights at the corners (red).
@@ -467,34 +483,40 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
   }
 
   // ------------------------------------------------------------ DECK 2, the high level, the SKY BRIDGE
-  const deckSlab = (k: { x0: number; z0: number; x1: number; z1: number }, H: number, bridge: boolean) => {
+  // Three weights, so not every walkway reads the same: the main deck (along the towers and over
+  // the avenue) is deep, with girders and a lit soffit; the link down the square is light; the
+  // high level and the SKY BRIDGE are a thin slab, so the sky and the towers show between levels.
+  type DeckKind = 'main' | 'link' | 'bridge';
+  const deckSlab = (k: { x0: number; z0: number; x1: number; z1: number }, H: number, kind: DeckKind) => {
     const w = k.x1 - k.x0, d = k.z1 - k.z0, cx = (k.x0 + k.x1) / 2, cz = (k.z0 + k.z1) / 2;
     const alongX = w > d, len = alongX ? w : d, wid = alongX ? d : w;
-    solid.push(tint(boxAt(w, 12, d, cx, H - 6, cz), 0x8d8a86));
+    const slabT = kind === 'main' ? 16 : kind === 'link' ? 12 : 7;
+    solid.push(tint(boxAt(w, slabT, d, cx, H - slabT / 2, cz), kind === 'bridge' ? 0xa7abb0 : 0x8d8a86));
     const strip = (s: number, sw: number, t0: number, t1: number, y: number, c: number) => ground.push(alongX
       ? tint(flat(t1 - t0, sw, k.x0 + (t0 + t1) / 2, y, cz + s), c)
       : tint(flat(sw, t1 - t0, cx + s, y, k.z0 + (t0 + t1) / 2), c));
-    ground.push(tint(flat(w - 4, d - 4, cx, H + 0.4, cz), bridge ? 0x8f8c88 : 0x8a857e));
+    ground.push(tint(flat(w - 4, d - 4, cx, H + 0.4, cz), kind === 'bridge' ? 0x8f8c88 : 0x8a857e));
     for (const sg of [-1, 1]) strip(sg * (wid / 2 - 7), 8, 2, len - 2, H + 0.6, 0x45433f);
     strip(0, 10, 4, len - 4, H + 0.7, 0xb8973e);
     for (let t = 26; t < len - 4; t += 26) strip(0, wid - 22, t - 0.8, t + 0.8, H + 0.65, 0x6c6862);
-    // Girders: the bridge gets a deep truss-like fascia, the deck a plain edge girder.
-    const gd = bridge ? 46 : 18;
+    const gd = kind === 'main' ? 34 : kind === 'link' ? 10 : 0;
     for (const sg of [-1, 1]) {
       const [ex, ez] = alongX ? [cx, cz + sg * (wid / 2 - 3)] : [cx + sg * (wid / 2 - 3), cz];
-      solid.push(tint(boxAt(alongX ? len : 6, gd, alongX ? 6 : len, ex, H - 12 - gd / 2, ez), 0x5f6670));
-      // Light line under the edge (the deck reads at night from the street).
-      glow.push(tint(boxAt(alongX ? len : 2, 2, alongX ? 2 : len, ex, H - 13 - gd, ez), bridge ? L[1] : 0xf2f6ff));
+      if (gd) solid.push(tint(boxAt(alongX ? len : 6, gd, alongX ? 6 : len, ex, H - slabT - gd / 2, ez), kind === 'main' ? 0x4f555e : 0x5f6670));
+      // Light line under the edge (the deck reads at night from the street; glass blue on the high level).
+      glow.push(tint(boxAt(alongX ? len : 1.5, 1.5, alongX ? 1.5 : len, ex, H - slabT - gd - 1, ez), kind === 'bridge' ? L[1] : 0xf2f6ff));
     }
-    if (bridge) {
-      for (let t = 30; t < len - 10; t += 60) {
-        for (const sg of [-1, 1]) {
-          const [ex, ez] = alongX ? [k.x0 + t, cz + sg * (wid / 2 - 2)] : [cx + sg * (wid / 2 - 2), k.z0 + t];
-          solid.push(tint(new THREE.BoxGeometry(4, 54, 4).rotateZ(alongX ? (t / 60) % 2 ? 0.6 : -0.6 : 0).rotateX(alongX ? 0 : (t / 60) % 2 ? 0.6 : -0.6).translate(ex, H - 35, ez), 0x8b939c));
-        }
+    if (kind === 'main') {
+      // Cross girders and a lit soffit between them: the main deck is the street's ceiling.
+      for (let t = 45; t < len - 20; t += 90) solid.push(tint(alongX ? boxAt(10, 24, wid - 10, k.x0 + t, H - slabT - 12, cz) : boxAt(wid - 10, 24, 10, cx, H - slabT - 12, k.z0 + t), 0x4a5058));
+      for (let t = 90; t < len - 20; t += 90) {
+        const [sx, sz] = alongX ? [k.x0 + t, cz] : [cx, k.z0 + t];
+        // Facing down (seen from the street below).
+        glow.push(tint(new THREE.PlaneGeometry(alongX ? 4 : wid - 24, alongX ? wid - 24 : 4).rotateX(Math.PI / 2).translate(sx, H - slabT - 0.5, sz), 0xeef3f8));
       }
+    } else if (kind === 'link') {
+      for (let t = 45; t < len - 20; t += 90) solid.push(tint(alongX ? boxAt(6, 8, wid - 10, k.x0 + t, H - slabT - 4, cz) : boxAt(wid - 10, 8, 6, cx, H - slabT - 4, k.z0 + t), 0x5d6168));
     }
-    for (let t = 45; t < len - 20; t += 90) solid.push(tint(alongX ? boxAt(8, 12, wid - 10, k.x0 + t, H - 18, cz) : boxAt(wid - 10, 12, 8, cx, H - 18, k.z0 + t), 0x5d6168));
     for (let t = 70, i = 0; t < len - 30; t += 170, i++) {
       const sg = i % 2 ? 1 : -1;
       const [lx, lz] = alongX ? [k.x0 + t, cz + sg * (wid / 2 - 14)] : [cx + sg * (wid / 2 - 14), k.z0 + t];
@@ -502,17 +524,20 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
       glow.push(tint(boxAt(11, 3, 11, lx, H + 57, lz), 0xf2f6ff));
       pool(lx - (alongX ? 0 : sg * 16), lz - (alongX ? sg * 16 : 0), 54, 0xf2f6ff, H + 0.9);
     }
-    if (!bridge) for (let t = 60; t < len; t += 150) pool(alongX ? k.x0 + t : cx, alongX ? cz : k.z0 + t, 64, L[2], 0.8);
+    if (kind !== 'bridge') for (let t = 60; t < len; t += 150) pool(alongX ? k.x0 + t : cx, alongX ? cz : k.z0 + t, kind === 'main' ? 70 : 54, 0xeef3f8, 0.8);
   };
-  for (const k of DECKS) deckSlab(k, DECK_H, false);
-  for (const k of HIGH_DECKS) deckSlab(k, HIGH_H, k.id === 'bridge');
-  // Fascias: VERTICAL GATE on both faces of the bridge (hero), DECK 2 on the arm over the avenue.
+  for (const k of DECKS) deckSlab(k, DECK_H, k.id === 'galW' ? 'link' : 'main');
+  for (const k of HIGH_DECKS) deckSlab(k, HIGH_H, 'bridge');
+  // Fascias: VERTICAL GATE on both faces of the bridge (hero, on a slim band), DECK 2 on the main deck's girder over the avenue.
   const X = SHINJUKU_CROSS, bridge = HIGH_DECKS.find((k) => k.id === 'bridge')!;
-  for (const [z, nz] of [[bridge.z0, -1], [bridge.z1, 1]] as const) hero.push(quad(360, 30, CELLS.bridge, X.x, HIGH_H - 30, z + nz * 2.2, 0, nz));
-  for (const [z, nz] of [[-1780, -1], [-1710, 1]] as const) lit.push(quad(300, 18, CELLS.deck, X.x, DECK_H - 11, z + nz * 1.2, 0, nz));
+  for (const [z, nz] of [[bridge.z0, -1], [bridge.z1, 1]] as const) {
+    solid.push(tint(boxAt(250, 14, 3, X.x, HIGH_H - 13, z + nz * 0.8), 0x1a1d24));
+    hero.push(quad(236, 13, CELLS.bridge, X.x, HIGH_H - 13, z + nz * 2.4, 0, nz));
+  }
+  for (const [z, nz] of [[-1780, -1], [-1710, 1]] as const) lit.push(quad(320, 26, CELLS.deck, X.x, DECK_H - 16 - 17, z + nz * 1.2, 0, nz));
   // Bridge piers: slender columns against the towers' faces, so the gate reads as carried by them.
   for (const [x, z] of [[-2905, -735], [-2905, -795], [-2425, -735], [-2425, -795]]) {
-    solid.push(tint(new THREE.CylinderGeometry(7, 9, HIGH_H - 60, 8).translate(x, HIGH_H / 2 - 30, z), 0x77808a));
+    solid.push(tint(new THREE.CylinderGeometry(4, 5, HIGH_H - 8, 8).translate(x, (HIGH_H - 8) / 2, z), 0x8a929b));
   }
   for (const p of WORLD) {
     if (p.group !== 'sjdeck' && p.group !== 'shinjuku') continue;
@@ -594,18 +619,59 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
   signPost(-2870, -1200, 1, 0, CELLS.way(3));
   signPost(-2870, -640, 0, 1, CELLS.way(2));
 
-  // ------------------------------------------------------------ PILLAR VISION (wrapped round T1's south-west corner)
-  {
-    const P = PILLAR, h = P.y1 - P.y0, y = (P.y0 + P.y1) / 2;
-    hero.push(quad(P.w, h, CELLS.pillar, P.x + P.w / 2 + 4, y, P.z + 3, 0, 1));
-    hero.push(quad(P.w, h, CELLS.pillar, P.x - 3, y, P.z - P.w / 2 - 4, -1, 0));
-    solid.push(tint(boxAt(P.w + 14, h + 14, 4, P.x + P.w / 2 + 4, y, P.z + 1), 0x1d1f25), tint(boxAt(4, h + 14, P.w + 14, P.x - 1, y, P.z - P.w / 2 - 4), 0x1d1f25));
-    for (const dy of [-h / 2 - 5, h / 2 + 5]) {
-      glow.push(tint(boxAt(P.w + 12, 2.5, 2, P.x + P.w / 2 + 4, y + dy, P.z + 4), L[1]));
-      glow.push(tint(boxAt(2, 2.5, P.w + 12, P.x - 4, y + dy, P.z - P.w / 2 - 4), L[1]));
+  // ------------------------------------------------------------ level signs (GROUND / DECK 2 / SKY BRIDGE at every stair)
+  // Small, lit, at the foot and the top of each stair: where you are and where the stair goes.
+  const inBuilding = (x: number, z: number) => SHINJUKU_BUILT.buildings.some((o) => x > o.x0 - 4 && x < o.x1 + 4 && z > o.z0 - 4 && z < o.z1 + 4);
+  const levelSign = (x: number, y: number, z: number, nx: number, nz: number, i: number) => {
+    solid.push(tint(boxAt(2.5, 66, 2.5, x, y + 33, z), 0x5a5e66));
+    solid.push(tint(boxAt(nx ? 2 : 66, 26, nx ? 66 : 2, x, y + 60, z), 0x12151b));
+    for (const sg of [-1, 1]) lit.push(quad(62, 23, CELLS.level(i), x + sg * nx * 1.2, y + 60, z + sg * nz * 1.2, sg * nx, sg * nz));
+    glow.push(tint(boxAt(nx ? 2.4 : 66, 1.5, nx ? 66 : 2.4, x, y + 73.5, z), i % 3 === 0 ? 0xf2f6ff : L[1]));
+  };
+  for (const st of SHINJUKU_STAIRS) {
+    const ax = st.axis === 'x', c = ax ? (st.z0 + st.z1) / 2 : (st.x0 + st.x1) / 2, wid = ax ? st.z1 - st.z0 : st.x1 - st.x0;
+    const lo = st.dir === 1 ? (ax ? st.x0 : st.z0) : ax ? st.x1 : st.z1, hi = st.dir === 1 ? (ax ? st.x1 : st.z1) : ax ? st.x0 : st.z0;
+    const ground0 = st.hLow === 0;
+    // Foot: just before the first step, beside the stair (on the side clear of buildings).
+    for (const [t, lat, y, cell] of [[lo - st.dir * 22, wid / 2 + 9, st.hLow, ground0 ? 0 : 1], [hi + st.dir * 22, wid / 2 - 8, st.hHigh, ground0 ? 2 : 3]] as const) {
+      const side = [1, -1].find((sg) => {
+        const px = ax ? t : c + sg * lat, pz = ax ? c + sg * lat : t;
+        return !inBuilding(px, pz);
+      }) ?? 1;
+      const px = ax ? t : c + side * lat, pz = ax ? c + side * lat : t;
+      levelSign(px, y, pz, ax ? -st.dir : 0, ax ? 0 : -st.dir, cell);
     }
-    glow.push(tint(boxAt(3, h + 12, 3, P.x - 4, y, P.z + 4), 0xf2f6ff));
-    pool(P.x - 90, P.z + 120, 150, L[2], 0.9);
+  }
+
+  // ------------------------------------------------------------ the VERTICAL CORE (up T1's south-west corner)
+  {
+    const C = VERTICAL_CORE, t1 = SHINJUKU_BUILT.buildings.find((o) => o.id === 'T1')!;
+    const w = C.x1 - C.x0, d = C.z1 - C.z0, cx = (C.x0 + C.x1) / 2, cz = (C.z0 + C.z1) / 2, top = t1.h + C.spire;
+    // Unlike the towers' glass (vertical fins), the core is banded across: a glass body with a
+    // white light band every half storey, a ladder of light the eye climbs. Two mullions a face.
+    core.push(tint(boxAt(w - 4, top, d - 4, cx, top / 2, cz), 0xffffff));
+    for (const t of [w / 3, (2 * w) / 3]) solid.push(tint(boxAt(3, top, 3, C.x0 + t, top / 2, C.z1 - 1), 0x2a2e36));
+    for (const t of [d / 3, (2 * d) / 3]) solid.push(tint(boxAt(3, top, 3, C.x0 + 1, top / 2, C.z0 + t), 0x2a2e36));
+    for (const [x, z] of [[C.x0, C.z0], [C.x0, C.z1], [C.x1, C.z1]]) coreLight.push(tint(boxAt(4, top, 4, x, top / 2, z), 0xffffff));
+    const ring = (y: number, t: number, col: number) => {
+      coreLight.push(tint(boxAt(w + 3, t, 3, cx, y, C.z1 + 0.5), col), tint(boxAt(3, t, d + 3, C.x0 - 0.5, y, cz), col));
+      coreLight.push(tint(boxAt(w + 3, t, 3, cx, y, C.z0 - 0.5), col), tint(boxAt(3, t, d + 3, C.x1 + 0.5, y, cz), col));
+    };
+    for (let y = 30; y < top - 10; y += STOREY / 2) if (Math.abs(y - DECK_H) > 20 && Math.abs(y - HIGH_H) > 20 && Math.abs(y - 206) > 22) ring(y, 4.5, 0xffffff);
+    // Level marks where DECK 2 and the high level meet it (glass blue, heavier).
+    ring(DECK_H + 4, 9, L[1]);
+    ring(HIGH_H + 4, 9, L[1]);
+    // The top: a cap, a needle with a beacon (seen over the roofs from the square and the avenue).
+    solid.push(tint(boxAt(w + 10, 8, d + 10, cx, top + 4, cz), 0x2a2e36));
+    coreLight.push(tint(boxAt(6, 180, 6, cx, top + 98, cz), 0xffffff));
+    glow.push(tint(boxAt(12, 12, 12, cx, top + 194, cz), 0xff2a1e));
+    // The name plate above the deck (west and south, toward the crossing).
+    for (const [x, z, nx, nz] of [[C.x0 - 2.5, cz, -1, 0], [cx, C.z1 + 2.5, 0, 1]] as const) {
+      solid.push(tint(boxAt(nx ? 3 : w + 40, 30, nx ? d + 40 : 3, x - nx * 0.6, 206, z - nz * 0.6), 0x10131a));
+      hero.push(quad((nx ? d : w) + 34, 24, CELLS.ticker, x + nx * 1.2, 206, z + nz * 1.2, nx, nz));
+    }
+    pool(cx - 60, cz + 60, 160, L[1], 1.1);
+    pool(cx - 20, cz + 20, 70, 0xf2f6ff, 1.2);
   }
 
   // ------------------------------------------------------------ NIGHT LANES gate (at the lanes' south mouth)
@@ -613,13 +679,13 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
     const G = LANES_GATE, xc = (G.x0 + G.x1) / 2, span = G.x1 - G.x0, [s0, s1] = G.sign;
     for (const x of [G.x0, G.x1]) {
       solid.push(tint(boxAt(16, G.top, 16, x, G.top / 2, G.z), 0x1b1c22));
-      for (const dx of [-5, 5]) glow.push(tint(boxAt(2, G.top - 16, 2, x + dx, G.top / 2, G.z + 8.6), L[3]));
+      for (const dx of [-5, 5]) glow.push(tint(boxAt(2, G.top - 16, 2, x + dx, G.top / 2, G.z + 8.6), 0xf2f6ff));
       glow.push(tint(boxAt(2, G.top - 16, 2, x, G.top / 2, G.z - 8.6), 0xf2f6ff));
     }
     solid.push(tint(boxAt(span + 30, s1 - s0 + 8, 10, xc, (s0 + s1) / 2, G.z), 0x101015));
     for (const nz of [-1, 1]) hero.push(quad(span + 20, s1 - s0, CELLS.gate, xc, (s0 + s1) / 2, G.z + nz * 5.6, 0, nz));
-    glow.push(tint(boxAt(span + 24, 2.5, 12, xc, s0 - 3, G.z), L[1]));
-    pool(xc, G.z + 70, 110, L[3], 0.6);
+    glow.push(tint(boxAt(span + 24, 2.5, 12, xc, s0 - 3, G.z), L[3]));
+    pool(xc, G.z + 70, 110, 0xfff1dc, 0.6);
   }
 
   // ------------------------------------------------------------ ground: the base square, the lanes, the crossing
@@ -661,18 +727,18 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
           wire.push(ax + (bx - ax) * t, y, az + (bz - az) * t, ax + (bx - ax) * t2, 200 - 20 * 4 * t2 * (1 - t2), az + (bz - az) * t2);
         }
       }
-      pool((ax + bx) / 2, (az + bz) / 2, 80, L[3], 0.6);
+      pool((ax + bx) / 2, (az + bz) / 2, 80, 0xffe6c8, 0.6);
     }
     const wg = new THREE.BufferGeometry();
     wg.setAttribute('position', new THREE.Float32BufferAttribute(wire, 3));
     scene.add(new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0x18181c })));
   }
   // The VERTICAL CROSS: a cool light pool in the middle, and white light along the avenue's kerbs.
-  pool(X.x, X.z, 220, L[2], 1.0);
+  pool(X.x, X.z, 220, 0xeef3f8, 1.0);
   for (const z of [-1900, -1700, -1000, -800]) pool(X.x, z, 120, 0xf2f6ff, 1.0);
   // RAIL LANE (between T3 and the tracks): lanterns on a wire and air-con units.
   for (let k = 0; k < 5; k++) lanterns.push(M4(-3275, 190, -890 + k * 50));
-  pool(-3275, -790, 90, L[3], 0.6);
+  pool(-3275, -790, 90, 0xffe6c8, 0.6);
   for (const [x, z] of [[-3238, -860], [-3238, -760]] as const) acs.push(M4(x, 20, z, -Math.PI / 2));
 
   // Railway arches by Shinjuku station: lit shops under the tracks (the dark wall west of the square).
@@ -751,6 +817,12 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
   add(ground, groundMat, false);
   add(arches, archMat, false);
   add(pools, poolMat, false, false, 1);
+  // The VERTICAL CORE's glass: pale by day (it reads against the darker tower glass), lit through at night.
+  const coreMat = new THREE.MeshBasicMaterial({ color: 0x8fa9bf });
+  NIGHT_GLOW.push({ set: (k) => { coreMat.color.setHex(0x8fa9bf).lerp(new THREE.Color(0xa9cbe6), k); } });
+  add(core, coreMat, false, false);
+  // Its light bands stay full white by day and night (the brightest lines in the district).
+  add(coreLight, new THREE.MeshBasicMaterial({ vertexColors: true }), false, false);
   let instanced = 0;
   const inst = (geo: THREE.BufferGeometry, mat: THREE.Material, ms: THREE.Matrix4[], cast = true) => {
     if (!ms.length) return;
@@ -767,8 +839,9 @@ export function buildShinjuku(scene: THREE.Scene): ShinjukuStats {
   inst(new THREE.BoxGeometry(36, 30, 26), new THREE.MeshStandardMaterial({ color: 0xcfcdc6, roughness: 0.8 }), acs);
   inst(new THREE.CylinderGeometry(28, 28, 46, 12), new THREE.MeshStandardMaterial({ color: 0x9fb2bd, roughness: 0.6 }), tanks);
   inst(new THREE.CylinderGeometry(2.4, 2.4, 1, 6), new THREE.MeshStandardMaterial({ color: 0x6d6a66, roughness: 0.6, metalness: 0.3 }), pipes, false);
-  const lanternMat = new THREE.MeshBasicMaterial({ color: 0xff6a80 });
-  NIGHT_GLOW.push({ set: (k) => { lanternMat.color.setHex(0xff6a80).multiplyScalar(0.7 + 0.3 * k); } });
+  // Paper lanterns (warm white, not neon pink).
+  const lanternMat = new THREE.MeshBasicMaterial({ color: 0xffe6c8 });
+  NIGHT_GLOW.push({ set: (k) => { lanternMat.color.setHex(0xffe6c8).multiplyScalar(0.7 + 0.3 * k); } });
   inst(new THREE.CylinderGeometry(6, 6, 16, 8), lanternMat, lanterns, false);
   inst(new THREE.CylinderGeometry(4, 5, 28, 8), new THREE.MeshStandardMaterial({ color: 0x3a3d44, roughness: 0.5, metalness: 0.4 }), bollards, false);
   inst(new THREE.BoxGeometry(70, 24, 30), new THREE.MeshStandardMaterial({ color: 0x55603f, roughness: 0.9 }), planters);
