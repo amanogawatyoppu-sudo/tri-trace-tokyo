@@ -7,6 +7,7 @@ import { brickFacadeTexture, detailNoise, stoneFacadeTexture, facadeTexture, gro
 import { buildCity } from './city';
 import { buildDistricts } from './districts';
 import { buildShibuya } from './shibuya';
+import { buildShinjuku } from './shinjuku';
 import { buildStairLights } from './stairLights';
 import { buildBases, buildLockPoints } from './objectives';
 import { NIGHT_GLOW } from './nightGlow';
@@ -304,6 +305,8 @@ function buildWorld(scene: THREE.Scene): void {
     if (p.group === 'radioTower' || p.group === 'tokyoTowerSpire' || p.group === 'tokyoTowerLeg' || p.group === 'dome') continue;
     // Shibuya's decks, stairs, gate and subway entrance are drawn by render/shibuya.ts.
     if (p.group === 'skyway' || p.group === 'shibuya') continue;
+    // Shinjuku's decks, stairs, podium roofs and gate posts are drawn by render/shinjuku.ts.
+    if (p.group === 'sjdeck' || p.group === 'shinjuku') continue;
     if (p.kind === 'ramp') { add(matKey(p), rampGeometry(p)); continue; }
     const b = p as BoxPrim;
     const h = b.y1 - b.y0, key = matKey(b);
@@ -598,6 +601,7 @@ export function buildScene(canvas: HTMLCanvasElement): SceneRefs {
   buildDistricts(scene);
   // v10 MAP REFORGE: the rebuilt centre of Shibuya (the Golden Sector).
   buildShibuya(scene);
+  buildShinjuku(scene);
   buildStairLights(scene);
   const train = buildRailway(scene);
   // A fixed handful of lamp lights (never more or fewer: that would recompile every material).

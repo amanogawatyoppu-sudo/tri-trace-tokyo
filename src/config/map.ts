@@ -3,6 +3,11 @@ import {
   HALO_SCREEN, MAZE, MAZE_BUILDINGS, MAZE_GATE, MAZE_MAP, SHIBUYA_BUILDINGS, SHIBUYA_LAMPS, SHIBUYA_ZONES, SKY_DECKS, SKY_H, SKY_LEGS, SKY_STAIRS, SUBWAY,
 } from './shibuya';
 import type { ShibuyaBuilding } from './shibuya';
+import {
+  AVENUE, DECKS, DECK_H, DECK_LEGS, HIGH_DECKS, HIGH_H, LANES, LANES_GATE, LANES_MAP, LANE_BUILDINGS, SHINJUKU_BUILDINGS, SHINJUKU_CROSS, SHINJUKU_LAMPS,
+  SHINJUKU_STAIRS, SHINJUKU_ZONES,
+} from './shinjuku';
+import type { ShinjukuBuilding } from './shinjuku';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -255,10 +260,10 @@ function building(
  * Two-storey 雑居ビル with an interior staircase climbing west → east to a
  * roof terrace. Returns the stair foot, the terrace and a ground-floor spot.
  */
-function walkUp(id: string, cx: number, cz: number, mat: Material = 'concrete') {
+function walkUp(id: string, cx: number, cz: number, mat: Material = 'concrete', extraDoors: { side: Side; at: number; width: number }[] = []) {
   const w = 360, d = 260;
   building(id, cx, cz, w, d,
-    [{ side: 's', at: 60, width: 110 }, { side: 'e', at: 40, width: 110 }, { side: 'w', at: 30, width: 100 }],
+    [{ side: 's', at: 60, width: 110 }, { side: 'e', at: 40, width: 110 }, { side: 'w', at: 30, width: 100 }, ...extraDoors],
     { hole: { x0: cx - 180, x1: cx + 120, z0: cz - 130, z1: cz - 30 } }, mat);
   // A landing at the foot (west) and the terrace at the top (east).
   ramp(cx, cz - 80, 240, 100, 'x', 1, 0, UPPER, 'stairs', 'wood', id);
@@ -508,7 +513,8 @@ expressway('x', EXPRESS_5.z, EXPRESS_5.from, EXPRESS_5.to); // 5号線 (池袋)
 
 // ---------------------------------------------------------------- walk-up buildings (2F / rooftop) and the arcade
 /** 歌舞伎町 雑居ビル and a 高輪 office with roof terraces. */
-const WALKUP_KABUKI = walkUp('walkupK', sc(-1260), sc(-960));
+// (v10.1: a back door on the north side, so the Shinjuku walk-up is a way through, not a dead end.)
+const WALKUP_KABUKI = walkUp('walkupK', sc(-1260), sc(-960), 'concrete', [{ side: 'n', at: 140, width: 60 }]);
 walkUp('walkupT', sc(-40), sc(1960));
 /** アメ横 style arcade you can walk straight through (west / east doors, 7 m roof). */
 export const ARCADE = { x: k8(1600), z: k8(-2350), w: 700, d: 220 };
@@ -632,7 +638,7 @@ export interface Building {
   /** Beyond the tracks: scenery only. */
   outside: boolean;
   /** Drawn by its district's own renderer (v10: the rebuilt centre of Shibuya), not the generic city. */
-  custom?: 'shibuya';
+  custom?: 'shibuya' | 'shinjuku';
 }
 export interface StreetSeg { x: number; z: number; w: number; d: number; axis: 'x' | 'z'; kind: StreetKind }
 export interface Block { x0: number; z0: number; x1: number; z1: number; sides: Record<Side, StreetKind> }
@@ -914,6 +920,36 @@ const furnitureOut: Rect[] = [];
   }
 }
 
+/**
+ * Railings round walkable decks at `top`: each edge is walked in short steps and a step whose
+ * outside is `open` gets a railing piece (merged into runs). Used by Shinjuku's decks and roofs.
+ */
+function railings(decks: readonly { x0: number; z0: number; x1: number; z1: number }[], open: (x: number, z: number) => boolean, top: number, group: string): void {
+  const RAIL = 6, RAIL_H = 32, STEP = 10;
+  for (const k of decks) {
+    const edges: [number, number, number, number, number, number][] = [
+      [k.x0, k.z0, k.x1, k.z0, 0, -1], [k.x0, k.z1, k.x1, k.z1, 0, 1], [k.x0, k.z0, k.x0, k.z1, -1, 0], [k.x1, k.z0, k.x1, k.z1, 1, 0],
+    ];
+    for (const [ax, az, bx, bz, nx, nz] of edges) {
+      const len = Math.hypot(bx - ax, bz - az);
+      let run0 = -1;
+      for (let t = 0; t <= len; t += STEP) {
+        const px = ax + ((bx - ax) * Math.min(t + STEP / 2, len)) / len, pz = az + ((bz - az) * Math.min(t + STEP / 2, len)) / len;
+        const isOpen = t < len && open(px + nx * 4, pz + nz * 4);
+        if (isOpen && run0 < 0) run0 = t;
+        if ((!isOpen || t + STEP > len) && run0 >= 0) {
+          const t1 = isOpen ? len : t, L = t1 - run0;
+          if (L > 2) {
+            const cx = ax + ((bx - ax) * (run0 + L / 2)) / len - nx * (RAIL / 2), cz = az + ((bz - az) * (run0 + L / 2)) / len - nz * (RAIL / 2);
+            box(cx, cz, nx ? RAIL : L, nx ? L : RAIL, top + RAIL_H, 'metal', { y0: top, group });
+          }
+          run0 = -1;
+        }
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 渋谷 NEON MAZE (v10 MAP REFORGE, the Golden Sector)
 /**
  * The centre of Shibuya is rebuilt by hand (config/shibuya.ts) after the generated city, so
@@ -1022,6 +1058,128 @@ export const SHIBUYA_BUILT: { buildings: (ShibuyaBuilding & { h: number })[] } =
   for (const l of SHIBUYA_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
 }
 
+// ---------------------------------------------------------------- 新宿 VERTICAL CITY (v10.1 MAP REFORGE)
+/**
+ * The centre of Shinjuku is rebuilt by hand (config/shinjuku.ts) the same way as Shibuya: after
+ * the generated city, so the rest of Tokyo is untouched. The generated buildings, poles, cars,
+ * vending machines, trees, lamps and parking in the area and the 靖国通り footbridge (DECK 2
+ * crosses the avenue in its place) are taken out; the avenue is joined up, and the towers, the
+ * lanes, the decks, the bridge and the stairs put in.
+ */
+export const SHINJUKU_BUILT: { buildings: (ShinjukuBuilding & { h: number })[] } = { buildings: [] };
+{
+  const inZone = (x: number, z: number) => SHINJUKU_ZONES.some((r) => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1);
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (!inZone(p.x, p.z)) continue;
+    if ((GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car')) || p.group === 'footbridge') prims.splice(i, 1);
+  }
+  const keep = <T extends Point>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  keep(BUILDINGS, (b) => b.outside || !inZone(b.x, b.z));
+  keep(PARKINGS, (k) => !inZone(k.x, k.z));
+  keep(LIGHTS, (l) => !inZone(l.x, l.z));
+  keep(SIGNALS, (l) => !inZone(l.x, l.z));
+  keep(FOOTBRIDGES, (f) => !inZone(f.x, f.z));
+  keep(CROSSWALKS, (c) => !inZone(c.x, c.z));
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (!inZone(p.x, p.z)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+  // 靖国通り's stub west of the avenue becomes part of the base square.
+  keep(STREET_SEGS, (g) => !(g.axis === 'x' && Math.abs(g.z - SHINJUKU_CROSS.z) < 10 && g.x < AVENUE.x - AVENUE.w / 2));
+  keep(INTERSECTIONS, (ix) => !(Math.abs(ix.z - SHINJUKU_CROSS.z) < 10 && ix.x < AVENUE.x - AVENUE.w / 2 && inZone(ix.x, ix.z)));
+  // VERTICAL AVENUE, joined up through the VERTICAL CROSS.
+  const X = SHINJUKU_CROSS, YW = AVENUE_W;
+  for (const [z0, z1] of [[AVENUE.z0, X.z - YW / 2], [X.z + YW / 2, AVENUE.z1]]) {
+    STREET_SEGS.push({ x: AVENUE.x, z: (z0 + z1) / 2, w: AVENUE.w, d: z1 - z0, axis: 'z', kind: 'avenue' });
+  }
+  if (!INTERSECTIONS.some((ix) => ix.x === X.x && ix.z === X.z)) INTERSECTIONS.push({ x: X.x, z: X.z, w: AVENUE.w, d: YW, streets: 2 });
+  {
+    const g = 16, depth = 90, iw = AVENUE.w, id = YW;
+    CROSSWALKS.push({ x: X.x, z: X.z - id / 2 - g - depth / 2, w: iw, d: depth, axis: 'x' });
+    CROSSWALKS.push({ x: X.x, z: X.z + id / 2 + g + depth / 2, w: iw, d: depth, axis: 'x' });
+    CROSSWALKS.push({ x: X.x + iw / 2 + g + depth / 2, z: X.z, w: depth, d: id, axis: 'z' });
+    SIGNALS.push({ x: X.x + iw / 2 + 30, z: X.z + id / 2 + 30, ang: Math.PI });
+    SIGNALS.push({ x: X.x - iw / 2 - 30, z: X.z - id / 2 - 30, ang: 0 });
+  }
+  // Pavements (kerbs) along the east towers.
+  box(-2335, -910, 350, 500, CURB, 'sidewalk');
+
+  // Buildings: the towers and the lanes block (one building per letter of the map).
+  const all: ShinjukuBuilding[] = [...SHINJUKU_BUILDINGS];
+  for (const id of Object.keys(LANE_BUILDINGS)) {
+    let c0 = Infinity, c1 = -1, r0 = Infinity, r1 = -1;
+    LANES_MAP.forEach((row, r) => [...row].forEach((ch, c) => {
+      if (ch !== id) return;
+      c0 = Math.min(c0, c); c1 = Math.max(c1, c); r0 = Math.min(r0, r); r1 = Math.max(r1, r);
+    }));
+    const { cell, x0, z0 } = LANES;
+    all.push({ id, x0: x0 + c0 * cell, x1: x0 + (c1 + 1) * cell, z0: z0 + r0 * cell, z1: z0 + (r1 + 1) * cell, ...LANE_BUILDINGS[id] });
+  }
+  /** A rectangle minus another (up to four pieces). */
+  type R4 = { x0: number; z0: number; x1: number; z1: number };
+  const minus = (a: R4, b: R4): R4[] => {
+    if (b.x0 >= a.x1 || b.x1 <= a.x0 || b.z0 >= a.z1 || b.z1 <= a.z0) return [a];
+    const out: R4[] = [];
+    if (b.z0 > a.z0) out.push({ x0: a.x0, x1: a.x1, z0: a.z0, z1: b.z0 });
+    if (b.z1 < a.z1) out.push({ x0: a.x0, x1: a.x1, z0: b.z1, z1: a.z1 });
+    const z0 = Math.max(a.z0, b.z0), z1 = Math.min(a.z1, b.z1);
+    if (b.x0 > a.x0) out.push({ x0: a.x0, x1: b.x0, z0, z1 });
+    if (b.x1 < a.x1) out.push({ x0: b.x1, x1: a.x1, z0, z1 });
+    return out;
+  };
+  const rnd = prng(1101);
+  for (const b of all) {
+    const h = floorsToHeight(b.floors), x = (b.x0 + b.x1) / 2, z = (b.z0 + b.z1) / 2, w = b.x1 - b.x0, d = b.z1 - b.z0;
+    if (b.tower) {
+      // Podium (walkable roof where asked, less any stair that climbs inside the footprint), shaft on top.
+      const T = b.tower, S = T.shaft;
+      let parts: R4[] = [b];
+      for (const s of SHINJUKU_STAIRS) parts = parts.flatMap((r) => minus(r, s));
+      for (const r of parts) box((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2, r.x1 - r.x0, r.z1 - r.z0, T.podium, T.walkRoof ? 'concrete' : 'bldg', { noFloor: !T.walkRoof, group: T.walkRoof ? 'shinjuku' : undefined });
+      box((S.x0 + S.x1) / 2, (S.z0 + S.z1) / 2, S.x1 - S.x0, S.z1 - S.z0, h, 'bldg', { noFloor: true, y0: T.podium });
+      if (T.walkRoof) {
+        // Parapets round the roof where it is open (not on the bridge, the stair or the shaft).
+        const open = (px: number, pz: number) => !HIGH_DECKS.some((k) => px > k.x0 - 1 && px < k.x1 + 1 && pz > k.z0 - 1 && pz < k.z1 + 1)
+          && !SHINJUKU_STAIRS.some((s) => px > s.x0 - 1 && px < s.x1 + 1 && pz > s.z0 - 1 && pz < s.z1 + 1);
+        const roof = parts.flatMap((r) => minus(r, S));
+        const inR = (r: R4, px: number, pz: number) => px > r.x0 - 1 && px < r.x1 + 1 && pz > r.z0 - 1 && pz < r.z1 + 1;
+        railings(roof, (px, pz) => open(px, pz) && !inR(S, px, pz) && !roof.some((r) => inR(r, px, pz)), T.podium, 'shinjuku');
+      }
+    } else box(x, z, w, d, h, 'bldg', { noFloor: true });
+    BUILDINGS.push({ x, z, w, d, h, type: b.floors >= 12 ? 'tower' : b.floors <= 3 ? 'shop' : 'mixed', floors: b.floors, district: 'commercial', front: b.fronts[0], seed: Math.floor(rnd() * 1e9), outside: false, custom: 'shinjuku' });
+    SHINJUKU_BUILT.buildings.push({ ...b, h });
+  }
+
+  // DECK 2, the high level, railings, columns and stairs.
+  const id = 'sjdeck';
+  for (const k of DECKS) slab((k.x0 + k.x1) / 2, (k.z0 + k.z1) / 2, k.x1 - k.x0, k.z1 - k.z0, DECK_H, 'metal', id);
+  for (const k of HIGH_DECKS) slab((k.x0 + k.x1) / 2, (k.z0 + k.z1) / 2, k.x1 - k.x0, k.z1 - k.z0, HIGH_H, 'metal', id);
+  const stairAt = (x: number, z: number) => SHINJUKU_STAIRS.some((s) => x > s.x0 - 1 && x < s.x1 + 1 && z > s.z0 - 1 && z < s.z1 + 1);
+  const bldgAt = (x: number, z: number) => SHINJUKU_BUILT.buildings.some((b) => x > b.x0 - 1 && x < b.x1 + 1 && z > b.z0 - 1 && z < b.z1 + 1);
+  const deckAt = (list: typeof DECKS) => (x: number, z: number) => list.some((k) => x > k.x0 - 1 && x < k.x1 + 1 && z > k.z0 - 1 && z < k.z1 + 1);
+  railings(DECKS, (x, z) => !deckAt(DECKS)(x, z) && !stairAt(x, z) && !bldgAt(x, z), DECK_H, id);
+  railings(HIGH_DECKS, (x, z) => !deckAt(HIGH_DECKS)(x, z) && !stairAt(x, z) && !bldgAt(x, z), HIGH_H, id);
+  for (const [x, z] of DECK_LEGS) box(x, z, 24, 24, DECK_H - 12, 'metal', { group: id });
+  for (const s of SHINJUKU_STAIRS) ramp((s.x0 + s.x1) / 2, (s.z0 + s.z1) / 2, s.x1 - s.x0, s.z1 - s.z0, s.axis, s.dir, s.hLow, s.hHigh, 'stairs', 'metal', id);
+
+  // NIGHT LANES gate posts (the sign is drawn by render/shinjuku.ts).
+  for (const x of [LANES_GATE.x0, LANES_GATE.x1]) box(x, LANES_GATE.z, 16, 16, LANES_GATE.top, 'metal', { group: 'shinjuku', noFloor: true });
+  // Street trees on the avenue's west pavement and round the square.
+  for (const [x, z] of [[-3360, -1300], [-3360, -1100]]) tree(x, z, 250);
+  for (const l of SHINJUKU_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
+}
+
 export const WORLD: readonly Prim[] = prims;
 
 /** Green and gravel areas painted on the ground (decoration). */
@@ -1079,6 +1237,7 @@ export const PERCHES: readonly (Point & { y: number })[] = [
   { x: WALKUP_KABUKI.terrace.x, y: UPPER, z: WALKUP_KABUKI.terrace.z },
   ...FOOTBRIDGES.map((f) => ({ x: f.x, y: FOOTBRIDGE_H, z: f.z })),
   { x: -2700, y: SKY_H, z: 1720 }, // 渋谷 SKY RING over the scramble
+  { x: -2700, y: HIGH_H, z: -765 }, // 新宿 SKY BRIDGE over the avenue
 ];
 
 /**

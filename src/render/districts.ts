@@ -5,6 +5,7 @@ import { SECTORS, sectorAt } from '../sim/war';
 import { NIGHT_GLOW } from './nightGlow';
 import { DISTRICT_CODES } from '../config/terminology';
 import { SHIBUYA_LIGHTS } from './shibuya';
+import { SHINJUKU_LIGHTS } from '../config/shinjuku';
 
 /**
  * District identity (v9.0, visual only): each of the nine sectors dresses its buildings
@@ -29,7 +30,8 @@ export interface DistrictLook {
 
 /** By sector id (see SECTORS in sim/war). */
 export const DISTRICT_LOOKS: readonly DistrictLook[] = [
-  { palette: [0xffffff, 0xff5a4a, 0x7fd8ff], signs: 1.4, shape: 'strip', crown: 0.85, masts: 0.6 }, // 新宿
+  // 新宿 (v10.1 VERTICAL CITY): white, cold cyan, violet, crimson — away from every faction hue.
+  { palette: [...SHINJUKU_LIGHTS], signs: 1.4, shape: 'strip', crown: 0.85, masts: 0.6 }, // 新宿
   // 渋谷 (v10 Golden Sector): magenta, violet, mint, rose, white — no faction-like yellow or sky blue.
   { palette: [...SHIBUYA_LIGHTS], signs: 3.2, shape: 'strip', crown: 0.2, masts: 0.1 }, // 渋谷
   { palette: [0x7dffb0, 0xfff1c0, 0x45c8ff], signs: 1.2, shape: 'band', crown: 0.95, masts: 0.35 }, // 池袋

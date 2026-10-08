@@ -315,7 +315,7 @@ function quad(w: number, h: number, cell: Cell, x: number, y: number, z: number,
 }
 
 /** Geometry with a baked vertex colour (for solid, emissive-strip and ground meshes). */
-function tint(g: THREE.BufferGeometry, color: number | THREE.Color): THREE.BufferGeometry {
+export function tint(g: THREE.BufferGeometry, color: number | THREE.Color): THREE.BufferGeometry {
   const ng = g.index ? g.toNonIndexed() : g;
   const c = color instanceof THREE.Color ? color : new THREE.Color(color), n = ng.attributes.position.count, a = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3);
@@ -324,12 +324,12 @@ function tint(g: THREE.BufferGeometry, color: number | THREE.Color): THREE.Buffe
   return ng;
 }
 
-const boxAt = (w: number, h: number, d: number, x: number, y: number, z: number, ang = 0) => new THREE.BoxGeometry(w, h, d).rotateY(ang).translate(x, y, z);
-const flat = (w: number, d: number, x: number, y: number, z: number, ang = 0) => new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2).rotateY(ang).translate(x, y, z);
+export const boxAt = (w: number, h: number, d: number, x: number, y: number, z: number, ang = 0) => new THREE.BoxGeometry(w, h, d).rotateY(ang).translate(x, y, z);
+export const flat = (w: number, d: number, x: number, y: number, z: number, ang = 0) => new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2).rotateY(ang).translate(x, y, z);
 
 /** A side of a footprint as seen from outside: bottom-left → bottom-right, outward normal. */
-interface Face { ax: number; az: number; bx: number; bz: number; nx: number; nz: number; len: number; side: ShibuyaSide }
-function faceOf(b: { x0: number; z0: number; x1: number; z1: number }, side: ShibuyaSide): Face {
+export interface Face { ax: number; az: number; bx: number; bz: number; nx: number; nz: number; len: number; side: ShibuyaSide }
+export function faceOf(b: { x0: number; z0: number; x1: number; z1: number }, side: ShibuyaSide): Face {
   switch (side) {
     case 's': return { ax: b.x0, az: b.z1, bx: b.x1, bz: b.z1, nx: 0, nz: 1, len: b.x1 - b.x0, side };
     case 'n': return { ax: b.x1, az: b.z0, bx: b.x0, bz: b.z0, nx: 0, nz: -1, len: b.x1 - b.x0, side };
@@ -338,7 +338,7 @@ function faceOf(b: { x0: number; z0: number; x1: number; z1: number }, side: Shi
   }
 }
 /** Point `s` along a face and `out` in front of it. */
-const along = (f: Face, s: number, out: number): [number, number] => {
+export const along = (f: Face, s: number, out: number): [number, number] => {
   const tx = (f.bx - f.ax) / f.len, tz = (f.bz - f.az) / f.len;
   return [f.ax + tx * s + f.nx * out, f.az + tz * s + f.nz * out];
 };
