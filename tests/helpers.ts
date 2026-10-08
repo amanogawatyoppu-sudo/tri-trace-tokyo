@@ -1,5 +1,6 @@
 import { SITES } from '../src/config/map';
 import { AKIBA_ZONES } from '../src/config/akihabara';
+import { SHINAGAWA_ZONE } from '../src/config/shinagawa';
 import type { NationId } from '../src/config/nations';
 import { NATIONS } from '../src/config/nations';
 import type { RoleId, RosterSize } from '../src/config/roles';
@@ -44,4 +45,10 @@ export function freezeOthers(state: GameState, keep: Entity[]): void {
 /** Inside the rebuilt centre of Akihabara (MAP REFORGE phase 3): its zones and the arcade it reworks. */
 export function inAkihabara(p: { x: number; z: number; group?: string }): boolean {
   return p.group === 'arcade' || AKIBA_ZONES.some((r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1);
+}
+
+/** Inside the rebuilt area of Shinagawa (MAP REFORGE parallel C, FUTURE GATEWAY). */
+export function inShinagawa(p: { x: number; z: number }): boolean {
+  const Z = SHINAGAWA_ZONE;
+  return p.x > Z.x0 && p.x < Z.x1 && p.z > Z.z0 && p.z < Z.z1;
 }
