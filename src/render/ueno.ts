@@ -244,6 +244,7 @@ export function buildUeno(scene: THREE.Scene): UenoStats {
     sbox(G.half * 2 + 64, 8, 40, G.x, G.h + 4, G.z, C.graniteDark);
   }
   // Stone lantern pillars under the stair lanterns (the lanterns stand at tread height beside each flight).
+  const lanterns: [number, number, number][] = [];
   for (const p of WORLD) {
     if (p.kind !== 'ramp' || p.style !== 'stairs' || p.group !== 'hill') continue;
     if (!(p.x > STONE_AXIS.x0 && p.x < STONE_AXIS.x1)) continue;
@@ -252,6 +253,7 @@ export function buildUeno(scene: THREE.Scene): UenoStats {
       const off = (r.dir === 1 ? u - 0.5 : 0.5 - u) * len;
       const y = rampHeight(r, r.x, r.z + off);
       if (y > 4) sbox(13, y, 13, r.x + s * (wide / 2 + 9), y / 2, r.z + off, C.cap);
+      lanterns.push([r.x + s * (wide / 2 + 9), y, r.z + off]);
     }
     // Cheek kerbs along both sides of each flight (low, so you can still step off).
     for (const s of [-1, 1]) sbox(6, 4, len, r.x + s * (wide / 2 - 3), (r.hLow + r.hHigh) / 2 + 1, r.z, C.graniteDark);
@@ -318,6 +320,31 @@ export function buildUeno(scene: THREE.Scene): UenoStats {
   bollard(RAMP_LANDING.x0 + 14, PLATEAU.top, RAMP_LANDING.z1 - 14);
   bollard(RAMP_LANDING.x1 - 14, PLATEAU.top, RAMP_LANDING.z0 + 60);
 
+  // The STONE AXIS lanterns read too white at night: a slightly dimmer warm shade drawn just round each lantern head
+  // and its cap (stairLights.ts, shared with 愛宕山, stays as it is). About 18% less light at night; the nosings are untouched.
+  const shade = new THREE.Color(0xfff0d8).multiplyScalar(0.82 / 1.12).getHex();
+  for (const [x, y, z] of lanterns) {
+    gl(boxAt(11.6, 8.6, 11.6, x, y + 33, z), shade);
+    gl(boxAt(17.6, 3.6, 17.6, x, y + 38.5, z), shade);
+  }
+
+  // Foot lights: a few low, weak warm lights (drawn only; the night rules keep the grove dark) so the ground, the trunks,
+  // the walls and the way on read in the normal camera after dark. In the grove they sit on the wall ends and the hedge
+  // ends at the gaps; on CANOPY WALK beside the benches under the cliff.
+  const footPosts: THREE.Matrix4[] = [], footPools: [number, number][] = [];
+  const foot = new THREE.Color(C.lamp).multiplyScalar(0.55).getHex();
+  const footLight = (x: number, z: number, y = 0, px = x, pz = z) => {
+    footPosts.push(M4(x, y + 8, z, 0, 0.7, 16 / 26, 0.7));
+    gl(boxAt(5, 3, 5, x, y + 17.5, z), foot);
+    footPools.push([px, pz]);
+  };
+  for (const h of HEDGES.slice(1)) footLight((h.x0 + h.x1) / 2, h.z1 - 6, HEDGE_H, (h.x0 + h.x1) / 2 - 24, h.z1 + 20);
+  for (const w of GROVE_WALLS) {
+    const westEnd = w.x0 > GROVE.x0 + 10, x = westEnd ? w.x0 + 6 : w.x1 - 6, z = (w.z0 + w.z1) / 2;
+    footLight(x, z, WALL_H, x + (westEnd ? -20 : 20), z + 22);
+  }
+  for (const x of [2575, 2905]) footLight(x, PLATEAU.z0 - 8);
+
   // ------------------------------------------------------------ park lamps (posts; the heads glow, city.ts adds their halo and pool)
   const lampPosts: THREE.Matrix4[] = [], lampArms: THREE.Matrix4[] = [];
   for (const l of UENO_LAMPS) {
@@ -370,7 +397,7 @@ export function buildUeno(scene: THREE.Scene): UenoStats {
     green.push(tint(boxAt(w, HEDGE_H - 8, d, x, (HEDGE_H - 8) / 2, z), c), tint(boxAt(w - 6, 8, d - 6, x, HEDGE_H - 4, z), c.clone().multiplyScalar(1.12)));
   }
   // Low planting at the foot of the cliffs and along the square (drawn only; ankle high).
-  for (let x = PLATEAU.x0 + 30; x < PLATEAU.x1 - 20; x += 70) green.push(tint(boxAt(46, 10, 16, x, 5, PLATEAU.z0 - 9), new THREE.Color(C.hedge).multiplyScalar(1.1)));
+  for (let x = PLATEAU.x0 + 30; x < PLATEAU.x1 - 20; x += 70) if (Math.abs(x - 2530) > 44 && Math.abs(x - 2860) > 44) green.push(tint(boxAt(46, 10, 16, x, 5, PLATEAU.z0 - 9), new THREE.Color(C.hedge).multiplyScalar(1.1)));
   green.push(tint(boxAt(14, 12, 200, PLAZA.x0 + 8, 6, -3460), new THREE.Color(C.hedge).multiplyScalar(1.05)));
   const hedgeMesh = new THREE.Mesh(mergeGeometries(green)!, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 1 }));
   hedgeMesh.castShadow = hedgeMesh.receiveShadow = true;
@@ -401,6 +428,8 @@ export function buildUeno(scene: THREE.Scene): UenoStats {
   for (const x of [2660, 2940]) seat(x, GREEN_TERRACE.z1 - 34, 0, PLATEAU.top);
   for (const x of [2400, 2560, 2740, 2900, 3060]) seat(x, -4532, Math.PI);
   seat(3100, -3600, -Math.PI / 2);
+  // CANOPY WALK: two benches with their backs to the cliff, between shrubs, so it reads as a park walk, not a wall.
+  for (const x of [2530, 2860]) seat(x, PLATEAU.z0 - 14, Math.PI);
   seat(2600, -4200, 0, PLATEAU.top);
   add(instanced(bench, new THREE.MeshStandardMaterial({ color: C.wood, roughness: 0.8 }), benches));
 
@@ -409,6 +438,7 @@ export function buildUeno(scene: THREE.Scene): UenoStats {
   const posts = [
     ...lampPosts.map((m) => m.clone().multiply(new THREE.Matrix4().makeScale(1, 200 / 26, 1))),
     ...bollards,
+    ...footPosts,
     ...boardPosts.map((m) => m.clone().multiply(new THREE.Matrix4().makeScale(1, 80 / 26, 1))),
   ];
   add(instanced(new THREE.CylinderGeometry(2.6, 3.4, 26, 6), bronze, posts));
@@ -433,6 +463,12 @@ export function buildUeno(scene: THREE.Scene): UenoStats {
       crownCol.push(c.getHex());
     }
   }
+  // Low shrubs along the foot of the cliff on CANOPY WALK (the crown blob, small): drawn only, within 30 of the cliff.
+  for (const x of [2385, 2440, 2480, 2660, 2700, 2760, 2950, 2985]) {
+    const tr = prng(x), r = 17 + tr() * 8;
+    crowns.push(M4(x, r * 0.55, PLATEAU.z0 - 13 - tr() * 6, tr() * 6, r, r * 0.75, r * 0.8));
+    crownCol.push(new THREE.Color().setHSL(0.27 + tr() * 0.05, 0.34, 0.17 + tr() * 0.05).getHex());
+  }
   // Trunk: 22 wide at the root (the solid is 24), tapering; flared base.
   const trunkGeo = new THREE.CylinderGeometry(7, 10, 1, 8).translate(0, 0.5, 0);
   add(instanced(trunkGeo, nearFade(new THREE.MeshStandardMaterial({ color: 0x4a3a2b, roughness: 1 }), 40, 140), trunks));
@@ -448,6 +484,7 @@ export function buildUeno(scene: THREE.Scene): UenoStats {
     const p = new THREE.Vector3().setFromMatrixPosition(m);
     poolGeo.push(flat(70, 70, p.x, p.y - 12.2, p.z));
   }
+  for (const [x, z] of footPools) poolGeo.push(flat(88, 88, x, 0.9, z));
   const poolMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
   const pools = new THREE.Mesh(mergeGeometries(poolGeo)!, poolMat);
   pools.renderOrder = 1;
