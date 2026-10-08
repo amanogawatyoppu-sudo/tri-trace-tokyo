@@ -9,6 +9,7 @@ import { buildDistricts } from './districts';
 import { buildShibuya } from './shibuya';
 import { buildShinjuku } from './shinjuku';
 import { buildAkihabara } from './akihabara';
+import { buildUeno } from './ueno';
 import { buildStairLights } from './stairLights';
 import { buildBases, buildLockPoints } from './objectives';
 import { NIGHT_GLOW } from './nightGlow';
@@ -310,6 +311,8 @@ function buildWorld(scene: THREE.Scene): void {
     if (p.group === 'sjdeck' || p.group === 'shinjuku') continue;
     // Akihabara's arcade, footbridge, tower, LED boards and switchgear are drawn by render/akihabara.ts.
     if (p.group === 'arcade' || p.group === 'akibaGate' || p.group === 'akibaTower' || p.group === 'akibaPower' || p.group === 'akibaBoard') continue;
+    // Ueno's trees, hedges, walls, balustrade, gate, trellis and hall are drawn by render/ueno.ts.
+    if (p.group === 'uenoTree' || p.group === 'uenoHedge' || p.group === 'uenoWall' || p.group === 'uenoRail' || p.group === 'uenoGate' || p.group === 'uenoTrellis' || p.group === 'uenoHall') continue;
     if (p.kind === 'ramp') { add(matKey(p), rampGeometry(p)); continue; }
     const b = p as BoxPrim;
     const h = b.y1 - b.y0, key = matKey(b);
@@ -607,6 +610,8 @@ export function buildScene(canvas: HTMLCanvasElement): SceneRefs {
   buildShinjuku(scene);
   // v10 MAP REFORGE phase 3: 秋葉原 ELECTRIC GRID.
   buildAkihabara(scene);
+  // MAP REFORGE (parallel A): 上野 GREEN HEIGHTS.
+  buildUeno(scene);
   buildStairLights(scene);
   const train = buildRailway(scene);
   // A fixed handful of lamp lights (never more or fewer: that would recompile every material).

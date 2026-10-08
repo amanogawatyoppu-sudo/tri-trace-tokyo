@@ -13,6 +13,10 @@ import {
   JUNCTION_BOARDS, MAIN_STREET, POWER_NODE,
 } from './akihabara';
 import type { AkibaBuilding } from './akihabara';
+import {
+  CULTURE_GATE, GREEN_TERRACE, GROVE_WALLS, HEDGES, HEDGE_H, RAMP_LANDING, STONE_AXIS, TRELLIS, TRUNK, TRUNK_H, UENO_HALL, UENO_LAMPS, UENO_TREES,
+  WALL_H, WEST_RAMP, inUenoZone,
+} from './ueno';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -1283,6 +1287,99 @@ export const AKIBA_BUILT: { buildings: (AkibaBuilding & { h: number })[] } = { b
   for (const l of AKIBA_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
 }
 
+// ---------------------------------------------------------------- 上野 GREEN HEIGHTS (MAP REFORGE parallel A)
+/**
+ * The park round 上野の山 is rebuilt by hand (config/ueno.ts) after the generated city, the same
+ * way as the other rebuilt districts: the generated pieces in the area, the hill's old slope,
+ * stairs, museum block and trees are taken out, and GREEN HEIGHTS put in — the GRAND PROMENADE
+ * and its WEST RAMP, the GROVE PATH (trees, hedges, low stone walls, a trellis), the STONE AXIS
+ * up to GREEN TERRACE, CULTURE GATE, UENO HALL and the CANOPY WALK trees. The hill itself, the
+ * pond, LUNA's base and the LOCK POINT stay where they are.
+ */
+export const UENO_BUILT = { trees: UENO_TREES.length };
+{
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (!inUenoZone(p.x, p.z)) continue;
+    const generated = GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car');
+    // The hill's old west slope and south stairs, and the old museum block (UENO HALL replaces it).
+    const old = (p.kind === 'ramp' && p.group === 'hill') || p.group === 'museum';
+    if (generated || old) prims.splice(i, 1);
+  }
+  const keep = <T extends Point>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  keep(BUILDINGS, (b) => b.outside || !inUenoZone(b.x, b.z));
+  keep(PARKINGS, (k) => !inUenoZone(k.x, k.z));
+  keep(LIGHTS, (l) => !inUenoZone(l.x, l.z));
+  keep(SIGNALS, (l) => !inUenoZone(l.x, l.z));
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (!inUenoZone(p.x, p.z)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+  const rect = (r: { x0: number; z0: number; x1: number; z1: number }) => ({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, w: r.x1 - r.x0, d: r.z1 - r.z0 });
+
+  // C. STONE AXIS: two stone flights and a landing (group 'hill': the stair lights light them like the old stairs).
+  {
+    const A = STONE_AXIS, w = A.x1 - A.x0, x = (A.x0 + A.x1) / 2;
+    for (const f of [A.lower, A.upper]) ramp(x, (f.z0 + f.z1) / 2, w, f.z1 - f.z0, 'z', -1, f.h0, f.h1, 'stairs', 'stone', 'hill');
+    box(x, (A.landing.z0 + A.landing.z1) / 2, w, A.landing.z1 - A.landing.z0, A.landing.h, 'stone', { group: 'uenoAxis' });
+  }
+  // GREEN TERRACE and its balustrade (open where the axis arrives).
+  {
+    const T = GREEN_TERRACE, r = rect(T), RAIL = 8, top = T.top, id = 'uenoRail';
+    box(r.x, r.z, r.w, r.d, top, 'stone', { group: 'uenoTerrace' });
+    const s0 = STONE_AXIS.x0, s1 = STONE_AXIS.x1;
+    box((T.x0 + s0) / 2, T.z1 - RAIL / 2, s0 - T.x0, RAIL, top + 24, 'stone', { y0: top, group: id, noFloor: true });
+    box((s1 + T.x1) / 2, T.z1 - RAIL / 2, T.x1 - s1, RAIL, top + 24, 'stone', { y0: top, group: id, noFloor: true });
+    box(T.x0 + RAIL / 2, r.z, RAIL, r.d, top + 24, 'stone', { y0: top, group: id, noFloor: true });
+    box(T.x1 - RAIL / 2, r.z, RAIL, r.d, top + 24, 'stone', { y0: top, group: id, noFloor: true });
+  }
+  // A. WEST RAMP onto the plateau, and the landing at its top.
+  {
+    const R = rect(WEST_RAMP), L = rect(RAMP_LANDING);
+    ramp(R.x, R.z, R.w, R.d, 'z', -1, 0, UENO_HILL.top, 'slope', 'stone', 'uenoRamp');
+    box(L.x, L.z, L.w, L.d, UENO_HILL.top, 'stone', { group: 'uenoRamp' });
+  }
+  // CULTURE GATE: pillars and a lintel overhead.
+  {
+    const G = CULTURE_GATE;
+    for (const s of [-1, 1]) box(G.x + s * G.half, G.z, 28, 28, G.h, 'stone', { group: 'uenoGate', noFloor: true });
+    box(G.x, G.z, G.half * 2 + 40, 26, G.h, 'stone', { y0: G.lintel, group: 'uenoGate', noFloor: true });
+  }
+  // UENO HALL on the plateau.
+  {
+    const H = rect(UENO_HALL);
+    box(H.x, H.z, H.w, H.d, UENO_HILL.top + UENO_HALL.h, 'stone', { y0: UENO_HILL.top, group: 'uenoHall', noFloor: true });
+  }
+  // B. GROVE PATH: hedges, low stone walls and the trellis.
+  for (const h of HEDGES) { const r = rect(h); box(r.x, r.z, r.w, r.d, HEDGE_H, 'hedge', { group: 'uenoHedge', noFloor: true }); }
+  for (const g of GROVE_WALLS) { const r = rect(g); box(r.x, r.z, r.w, r.d, WALL_H, 'stone', { group: 'uenoWall', noFloor: true }); }
+  {
+    const T = TRELLIS, P = 14;
+    for (const [x, z] of [[T.x0 + P / 2, T.z0 + P / 2], [T.x1 - P / 2, T.z0 + P / 2], [T.x0 + P / 2, T.z1 - P / 2], [T.x1 - P / 2, T.z1 - P / 2]]) {
+      box(x, z, P, P, T.h, 'wood', { group: 'uenoTrellis', noFloor: true });
+    }
+    const r = rect(T);
+    box(r.x, r.z, r.w, r.d, T.h + 8, 'wood', { y0: T.h, group: 'uenoTrellis', noFloor: true });
+  }
+  // Big trees: the trunk is solid (sight and movement); the crown is drawn high above the path.
+  for (const t of UENO_TREES) {
+    const y0 = t.high ? UENO_HILL.top : 0;
+    box(t.x, t.z, TRUNK, TRUNK, y0 + TRUNK_H, 'wood', { y0, group: 'uenoTree', noFloor: true });
+  }
+  // Park lamps (their posts are drawn by render/ueno.ts; the lamp is in the night rules like any street lamp).
+  for (const l of UENO_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: true });
+}
+
 export const WORLD: readonly Prim[] = prims;
 
 /** Green and gravel areas painted on the ground (decoration). */
@@ -1355,9 +1452,9 @@ export const SITES = {
   /** Tokyo Tower: a point half way up the outdoor stair (it rises northward) and the FootTown roof. */
   towerStairsMid: { x: TOKYO_TOWER.x, z: TOKYO_TOWER.z + FOOTTOWN.d / 2 + 180, y: FOOTTOWN.h / 2 },
   towerDeck: { x: TOKYO_TOWER.x, y: FOOTTOWN.h, z: TOKYO_TOWER.z },
-  /** 上野の山: foot of the west slope (walk east to climb), the top, and a cliff foot to the north. */
-  hillSlopeFoot: { x: UENO_SLOPE.x - UENO_SLOPE.len / 2 - 50, z: UENO_SLOPE.z },
-  hillSlopeDir: { x: 1, z: 0 },
+  /** 上野の山: foot of the WEST RAMP (walk north to climb), the top, and a cliff foot to the north. */
+  hillSlopeFoot: { x: (WEST_RAMP.x0 + WEST_RAMP.x1) / 2, z: WEST_RAMP.z1 + 50 },
+  hillSlopeDir: { x: 0, z: -1 },
   hillTop: { x: UENO_HILL.x + 200, y: UENO_HILL.top, z: UENO_HILL.z + 60 },
   hillCliffFoot: { x: UENO_HILL.x + 60, z: UENO_HILL.z - UENO_HILL.d / 2 - 40 },
   /** 愛宕山 stone stairs (rise westward): a point half way up. */
@@ -1378,8 +1475,8 @@ export const SITES = {
   dietNorth: { x: DIET.x + 180, z: DIET.z - DIET.d / 2 - 90 },
   dietSouth: { x: DIET.x + 180, z: DIET.z + DIET.d / 2 + 90 },
   dietOverY: DIET.h * 4 + 200,
-  /** 上野 stone stairs (rise northward): a point half way up. */
-  uenoStairsMid: { x: UENO_STAIRS.x, z: UENO_STAIRS.z, y: UENO_HILL.top / 2 },
+  /** 上野 STONE AXIS (rises northward): half way up the lower flight. */
+  uenoStairsMid: { x: (STONE_AXIS.x0 + STONE_AXIS.x1) / 2, z: (STONE_AXIS.lower.z0 + STONE_AXIS.lower.z1) / 2, y: (STONE_AXIS.lower.h0 + STONE_AXIS.lower.h1) / 2 },
   /** 聖橋 south slope, half way up. */
   bridgeSlopeMid: { x: HIJIRI, z: riverZAt(HIJIRI) + 200, y: 30 },
   /** A footbridge deck (歩道橋), if any was placed. */

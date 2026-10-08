@@ -1,5 +1,6 @@
 import { SITES } from '../src/config/map';
 import { AKIBA_ZONES } from '../src/config/akihabara';
+import { inUenoZone } from '../src/config/ueno';
 import type { NationId } from '../src/config/nations';
 import { NATIONS } from '../src/config/nations';
 import type { RoleId, RosterSize } from '../src/config/roles';
@@ -44,4 +45,9 @@ export function freezeOthers(state: GameState, keep: Entity[]): void {
 /** Inside the rebuilt centre of Akihabara (MAP REFORGE phase 3): its zones and the arcade it reworks. */
 export function inAkihabara(p: { x: number; z: number; group?: string }): boolean {
   return p.group === 'arcade' || AKIBA_ZONES.some((r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1);
+}
+
+/** Inside the rebuilt area of Ueno (MAP REFORGE parallel A: GREEN HEIGHTS). */
+export function inUeno(p: { x: number; z: number }): boolean {
+  return inUenoZone(p.x, p.z);
 }

@@ -36,3 +36,10 @@ compare draw calls, triangles and memory instead, and measure frame time on a de
 - `aki-perf.cjs` — draw calls / triangles / frame time / memory at 6 spots, day and night
 - `aki-dump.qa.ts` — `OUT=x.json npx vitest run --config tools/visual-qa/vitest.qa.ts`: prims + walkability flood fill from LUNA's base
 - `aki-plan.py`, `aki-sheets.py` — plan and review sheets (`AKI=<dir>`)
+
+## MAP REFORGE parallel A（上野）
+- Spots and the 30 s run reuse `aki-spots.cjs` / `aki-run30.cjs` (route and spots in `docs/review-ueno/README.md`)
+- `ueno-perf.cjs` — like `aki-perf.cjs`, at 6 Ueno spots plus one spot in Akihabara, Shibuya and Shinjuku (run with `AUTO0=1 TIER=0` so the quality tier does not step down mid-run)
+- `ueno-plan.qa.ts` — `OUT=x.json npx vitest run --config tools/visual-qa/vitest.qa.ts tools/visual-qa/ueno-plan.qa.ts`: prims + walkability flood fill from LUNA's base
+- `ueno-basehash.qa.ts` — prints the outside-Ueno hashes (run it on the base commit to refresh `BEFORE` in `tests/uenoReforge.test.ts`)
+- `ueno-plan.py before.json after.json out.jpg`, `ueno-sheets.py` (`UENO=<dir>`) — plan and review sheets

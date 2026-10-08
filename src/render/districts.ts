@@ -7,6 +7,7 @@ import { DISTRICT_CODES } from '../config/terminology';
 import { SHIBUYA_LIGHTS } from './shibuya';
 import { SHINJUKU_LIGHTS } from '../config/shinjuku';
 import { AKIBA_LIGHTS } from './akihabara';
+import { UENO_LIGHTS } from '../config/ueno';
 
 /**
  * District identity (v9.0, visual only): each of the nine sectors dresses its buildings
@@ -37,7 +38,8 @@ export const DISTRICT_LOOKS: readonly DistrictLook[] = [
   { palette: [...SHIBUYA_LIGHTS], signs: 3.2, shape: 'strip', crown: 0.2, masts: 0.1 }, // 渋谷
   { palette: [0x7dffb0, 0xfff1c0, 0x45c8ff], signs: 1.2, shape: 'band', crown: 0.95, masts: 0.35 }, // 池袋
   { palette: [0xffc27a, 0xfff0d6], signs: 0.35, shape: 'lantern', crown: 0.05, masts: 0 }, // 文京
-  { palette: [0xb9ff7a, 0xffd59a], signs: 0.45, shape: 'lantern', crown: 0.1, masts: 0 }, // 上野
+  // 上野 (GREEN HEIGHTS): warm lamp light and white, a little leaf green — no neon lime.
+  { palette: [...UENO_LIGHTS], signs: 0.45, shape: 'lantern', crown: 0.1, masts: 0 }, // 上野
   // 秋葉原 (v10 ELECTRIC GRID): white, violet-leaning electric blue, green, a little red — no LUNA sky blue or STAR yellow.
   { palette: [...AKIBA_LIGHTS], signs: 3.0, shape: 'screen', crown: 0.3, masts: 0.15 }, // 秋葉原
   { palette: [0xffe2a0, 0xffffff], signs: 0.5, shape: 'band', crown: 1, masts: 0.4 }, // 中央
