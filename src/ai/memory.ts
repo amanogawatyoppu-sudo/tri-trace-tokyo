@@ -114,6 +114,41 @@ export interface AiMemory {
   highSec: number;
   /** Pausing to look around after reaching a patrol / search point, until this time. */
   idleUntil: number;
+  /**
+   * Route recovery (AI QUALITY PHASE 1). `detour`: walking to a nearby spot to get off a wall,
+   * after which the real route is planned again (until `detourUntil` at the latest).
+   * `stuckCount`: recoveries in a row without reaching a route point (gives the goal up at 4).
+   * `wpBestD` / `wpBestAt`: closest it has got to the current route point, and when (sliding
+   * along a wall or circling a point counts as stuck too).
+   */
+  detour: boolean;
+  detourUntil: number;
+  stuckCount: number;
+  wpBestD: number;
+  wpBestAt: number;
+  /** Last spot the body itself got 20 units away from, and when (never reset by a new goal). */
+  moveX: number;
+  moveZ: number;
+  moveAt: number;
+  /**
+   * Chase deadlock (AI QUALITY PHASE 1): the enemy AI it is locked in a close mutual chase with,
+   * since when, and when that was last true (a short gap does not reset it).
+   */
+  duelWith: number | null;
+  duelSince: number;
+  duelSeen: number;
+  /** Duels settled lately (a second one with the same enemy ends the chase on both sides), and the last one's time. */
+  duelCount: number;
+  duelAt: number;
+  /** Breaking off: back away until this time; then leave `ignoreId` alone until `ignoreUntil`. */
+  breakUntil: number;
+  ignoreId: number | null;
+  ignoreUntil: number;
+  /** Close pursuit of one target (within reach, any target): who, since when, and its last grab attempt. */
+  closeWith: number | null;
+  closeSince: number;
+  closeSeen: number;
+  grabAt: number;
 }
 
 export function createAiMemory(): AiMemory {
@@ -122,5 +157,8 @@ export function createAiMemory(): AiMemory {
     goal: null, path: null, lookAt: null, aimId: null, leaderId: null, slot: 0, directOk: false, directAt: 0, thinkAt: 0, perceiveAt: 0, replanAt: 0,
     searchUntil: 0, searchCenter: null, chaseRole: 'direct', flankSide: 1, task: null,
     progressX: 0, progressZ: 0, progressAt: 0, maxStuckSec: 0, wpAt: 0, wpIndex: -1, bestSpotD: Infinity, highSec: 0, idleUntil: 0,
+    detour: false, detourUntil: 0, stuckCount: 0, wpBestD: Infinity, wpBestAt: 0, moveX: 0, moveZ: 0, moveAt: 0,
+    duelWith: null, duelSince: 0, duelSeen: -Infinity, duelCount: 0, duelAt: -Infinity, breakUntil: 0, ignoreId: null, ignoreUntil: 0,
+    closeWith: null, closeSince: 0, closeSeen: -Infinity, grabAt: -Infinity,
   };
 }

@@ -2,14 +2,14 @@ import type { Point } from '../config/nations';
 import type { NationId } from '../config/nations';
 import { NATION_IDS, NATIONS } from '../config/nations';
 import { HOTSPOTS, PERCHES as MAP_PERCHES, TOWER } from '../config/map';
-import { AI_SPEED, AI_TURN_RATE, CAP_RANGE, SPRINT_SPEED } from '../config/constants';
+import { AI_SPEED, AI_TURN_RATE, CAP_RANGE, CR, SPRINT_SPEED } from '../config/constants';
 import { tuning } from './difficulty';
 import type { Entity } from '../sim/entity';
 import { isHuman } from '../sim/entity';
 import type { GameState } from '../sim/state';
 import { elapsedSec, kingOf, speedMul, squadCommandOf } from '../sim/state';
 import { SNIPE_RANGE, useSpecial } from '../sim/systems/abilities';
-import { attemptCapture, captureCandidate } from '../sim/systems/capture';
+import { attemptCapture, captureCandidate, captureTier } from '../sim/systems/capture';
 import { SAME_LEVEL, dist, dist3 } from '../sim/systems/collision';
 import { accelerate, moveToward, turnBy, turnToward } from '../sim/systems/movement';
 import { lastStanding, tryStartRescue } from '../sim/systems/rescue';
@@ -46,6 +46,7 @@ function setGoal(state: GameState, e: Entity, goal: Waypoint, st: AiState): void
   if (g && Math.hypot(g.x - goal.x, g.z - goal.z) < 45 && Math.abs(g.y - goal.y) < 20 && ai.path) return;
   ai.goal = goal;
   ai.path = null;
+  ai.detour = false;
   ai.progressX = e.x;
   ai.progressZ = e.z;
   ai.progressAt = state.time;
@@ -68,7 +69,86 @@ function plan(state: GameState, e: Entity): void {
   }
   const pts = planPath(e, g);
   ai.path = { points: pts && pts.length ? [...pts, g] : [g], i: 0, goal: g };
+  ai.wpBestD = Infinity;
+  // No route (unreachable, or the search gave out): the straight line is only a try, and counts
+  // as a failed attempt, so a goal that keeps failing is given up instead of walked at for ever.
+  if (!pts || !pts.length) ai.stuckCount++;
 }
+
+/** Recoveries in a row (without reaching a route point) after which the goal is given up. */
+const GIVE_UP = 4;
+/** Not getting any closer to the current route point for this long counts as stuck (sliding along a wall, circling it). */
+const NO_CLOSER_MS = 3500;
+
+/**
+ * Stuck: step off to a nearby spot it can walk to in a straight line, then plan the real route
+ * again from there. (It used to keep a two-point route — that spot, then the far goal in a straight
+ * line — which was never planned again: kings walked into the same wall for minutes.)
+ */
+function unstick(state: GameState, e: Entity): void {
+  const ai = e.ai, now = state.time;
+  ai.progressX = e.x;
+  ai.progressZ = e.z;
+  ai.progressAt = now;
+  ai.wpBestD = Infinity;
+  if (++ai.stuckCount >= GIVE_UP || !ai.goal) {
+    // The same goal keeps failing: drop it so the role chooses again, rather than pressing on at the same wall.
+    ai.goal = null;
+    ai.path = null;
+    ai.detour = false;
+    ai.stuckCount = 0;
+    ai.replanAt = now + 600;
+    return;
+  }
+  let n: Waypoint | null = null;
+  for (let k = 0; k < 6 && !n; k++) {
+    const c = randomNodeNear(e.x, e.y, e.z, 70 + 30 * ai.stuckCount, state.rng);
+    if (c && Math.hypot(c.x - e.x, c.z - e.z) > 25 && canWalk(e, c.x, c.y, c.z)) n = { x: c.x, y: c.y, z: c.z };
+  }
+  if (n) {
+    ai.path = { points: [n], i: 0, goal: ai.goal };
+    ai.detour = true;
+    ai.detourUntil = now + 2000;
+  } else {
+    // Nowhere to step to: plan again from here, a little later each time (not every frame).
+    ai.path = null;
+    ai.detour = false;
+    ai.replanAt = now + 250 * ai.stuckCount;
+  }
+}
+
+/** Following a route while the body stays within 20 units this long is stuck, even if the goal keeps changing. */
+const BODY_STILL_MS = 4000;
+
+function bodyMoved(e: Entity, now: number): void {
+  e.ai.moveX = e.x;
+  e.ai.moveZ = e.z;
+  e.ai.moveAt = now;
+}
+
+/** Ends a detour: the next step plans the real route from where it now is. */
+function endDetour(state: GameState, e: Entity): void {
+  const ai = e.ai;
+  ai.detour = false;
+  ai.path = null;
+  ai.replanAt = 0;
+  ai.progressX = e.x;
+  ai.progressZ = e.z;
+  ai.progressAt = state.time;
+}
+
+/** Someone standing right in the way (a crowd, a squad mate): a bump, not a lost route. */
+function bodyAhead(state: GameState, e: Entity): boolean {
+  for (const o of state.entities) {
+    if (o === e || !o.alive || o.jailed || Math.abs(o.y - e.y) > SAME_LEVEL) continue;
+    const dx = o.x - e.x, dz = o.z - e.z, d = Math.hypot(dx, dz);
+    if (d < CR * 2 + 10 && (dx * e.dirX + dz * e.dirZ) / (d || 1) > 0.5) return true;
+  }
+  return false;
+}
+
+/** Route points of these states move with someone (a target, the leader, the king): getting no closer is not being stuck. */
+const MOVING_GOAL = new Set<AiState>(['CHASE', 'INTERCEPT', 'SQUAD', 'ESCORT']);
 
 function speedFor(st: AiState): number {
   switch (st) {
@@ -85,22 +165,25 @@ function follow(state: GameState, e: Entity, dt: number, speed: number): void {
   const ai = e.ai, now = state.time;
   plan(state, e);
   const path = ai.path;
-  if (!path) { ai.progressAt = now; return; }
+  if (!path) { ai.progressAt = now; bodyMoved(e, now); return; }
   let wp = path.points[path.i];
   // Passing points on the way count from a little further off (the turning circle at a run is wider
   // than 12 units: aiming for the exact spot makes people circle it); the destination itself is exact.
   while (wp && Math.hypot(wp.x - e.x, wp.z - e.z) < (path.i < path.points.length - 1 ? 26 : 12) && Math.abs(wp.y - e.y) < 24) {
     path.i++;
     wp = path.points[path.i];
+    if (!ai.detour) ai.stuckCount = 0;
   }
+  // Off the wall (or the detour spot is taking too long): plan the real route from here.
+  if (ai.detour && (!wp || now > ai.detourUntil)) { endDetour(state, e); return; }
   if (!wp) {
     // Arrived: on a patrol or search, stop for a moment and look around, as a person would.
     if (ai.state === 'PATROL' || ai.state === 'SEARCH') ai.idleUntil = now + 500 + state.rng() * 1800;
-    ai.path = null; ai.goal = null; ai.progressAt = now;
+    ai.path = null; ai.goal = null; ai.progressAt = now; ai.stuckCount = 0;
     return;
   }
   // A waypoint it has been near for a while without reaching (a ledge, a crowd): move on.
-  if (path.i !== ai.wpIndex) { ai.wpIndex = path.i; ai.wpAt = now; }
+  if (path.i !== ai.wpIndex) { ai.wpIndex = path.i; ai.wpAt = now; ai.wpBestD = Infinity; }
   else if (now - ai.wpAt > 1200 && Math.hypot(wp.x - e.x, wp.z - e.z) < 60 && path.i + 1 < path.points.length) {
     path.i++;
     ai.wpIndex = path.i;
@@ -108,22 +191,25 @@ function follow(state: GameState, e: Entity, dt: number, speed: number): void {
     wp = path.points[path.i];
   }
   moveToward(e, wp.x, wp.z, dt, speed);
+  // Getting closer to the route point? (Moving about without getting closer — along a wall, round
+  // the point — is stuck as well.)
+  const dw = Math.hypot(wp.x - e.x, wp.z - e.z);
+  if (dw < ai.wpBestD - 15 || ai.wpBestD === Infinity) { ai.wpBestD = dw; ai.wpBestAt = now; }
+  // The body itself going nowhere for long, whatever happens to the goal (a goal that keeps shifting
+  // a little — a moving lead — re-plans the route each time and would otherwise hide it).
+  if (Math.hypot(e.x - ai.moveX, e.z - ai.moveZ) > 20) bodyMoved(e, now);
+  else if (now - ai.moveAt > BODY_STILL_MS) { bodyMoved(e, now); unstick(state, e); return; }
   if (Math.hypot(e.x - ai.progressX, e.z - ai.progressZ) > 20) {
     ai.progressX = e.x;
     ai.progressZ = e.z;
     ai.progressAt = now;
+    if (!MOVING_GOAL.has(ai.state) && now - ai.wpBestAt > NO_CLOSER_MS) unstick(state, e);
   } else {
     const stuck = (now - ai.progressAt) / 1000;
     ai.maxStuckSec = Math.max(ai.maxStuckSec, stuck);
-    if (stuck > 1.2) {
-      // Unstick: step to a random nearby node, then replan to the real goal.
-      const n = randomNodeNear(e.x, e.y, e.z, 90, state.rng);
-      ai.path = n ? { points: [{ x: n.x, y: n.y, z: n.z }, ...(ai.goal ? [ai.goal] : [])], i: 0, goal: ai.goal ?? n } : null;
-      ai.progressX = e.x;
-      ai.progressZ = e.z;
-      ai.progressAt = now;
-      if (!n) ai.replanAt = 0;
-    }
+    // A short bump into someone in the way sorts itself out (they move, or get pushed aside):
+    // only a real block, or a long wait, counts as a lost route.
+    if (stuck > 1.2 && (stuck > 3 || !bodyAhead(state, e))) unstick(state, e);
   }
 }
 
@@ -151,9 +237,10 @@ function noticing(state: GameState, e: Entity): Entity | null {
   return best;
 }
 
-function nearestVisible(state: GameState, e: Entity, range: number, near: Point = e): Entity | null {
+function nearestVisible(state: GameState, e: Entity, range: number, near: Point = e, skip: number | null = null): Entity | null {
   let best: Entity | null = null, bd = range;
   for (const t of visibleEnemies(state, e)) {
+    if (t.id === skip) continue;
     const d = dist(t, near);
     if (d < bd) { best = t; bd = d; }
   }
@@ -169,7 +256,7 @@ export function targetOf(state: GameState, n: NationId): number | null {
 }
 
 /** Choose whom to chase: close, king-like (nation belief), and from the nation we are hunting. */
-function pickPrey(state: GameState, e: Entity, range: number): Entity | null {
+function pickPrey(state: GameState, e: Entity, range: number, skip: number | null = null): Entity | null {
   const belief = state.factions[e.nation].belief;
   const task = e.ai.task;
   const hunt = task?.kind === 'hunt' || task?.kind === 'huntKing' ? task.nation : null;
@@ -177,7 +264,7 @@ function pickPrey(state: GameState, e: Entity, range: number): Entity | null {
   let best: Entity | null = null, bs = Infinity;
   for (const t of visibleEnemies(state, e)) {
     const d = dist3(t, e);
-    if (d > range) continue;
+    if (d > range || t.id === skip) continue;
     // A king hunter looks past the small fry: king-like and lit-up enemies count for much more.
     const s = d - (belief.get(t.id) ?? 0) * (kingHunt ? 110 : 60) - (hunt === t.nation ? 150 : 0)
       - (kingLit(state, t, e.nation) ? 600 : 0) - (targetOf(state, e.nation) === t.id ? 400 : 0) + (Math.abs(t.y - e.y) > SAME_LEVEL ? 120 : 0);
@@ -200,6 +287,7 @@ function chaseRank(state: GameState, e: Entity, targetId: number): number {
  */
 function chase(state: GameState, e: Entity, t: Entity): void {
   const ai = e.ai;
+  if (giveUpClose(state, e, t)) return;
   ai.targetId = t.id;
   const rank = chaseRank(state, e, t.id);
   const s = ai.seen.get(t.id)!;
@@ -378,7 +466,9 @@ function around(p: Point, e: Entity, r: number, y = 0): Waypoint {
 
 /** Reacts to enemies in view; returns true if it took a hostile action. */
 function engage(state: GameState, e: Entity, range: number, near?: Point): boolean {
-  const t = near ? nearestVisible(state, e, range, near) : pickPrey(state, e, range);
+  // Just broke off a deadlocked duel with someone: leave that one alone for a while.
+  const skip = e.ai.ignoreUntil > state.time ? e.ai.ignoreId : null;
+  const t = near ? nearestVisible(state, e, range, near, skip) : pickPrey(state, e, range, skip);
   if (!t) return false;
   chase(state, e, t);
   // Rangers sprint to close a gap.
@@ -809,6 +899,13 @@ function think(state: GameState, e: Entity, aggro: number): void {
   }
   // The last of a nation still free goes to open the jails, whatever its role.
   if (e.role !== 'keyholder' && lastStanding(state, e) && jailedAlly(state, e)) { keyholderThink(state, e); return; }
+  // Breaking off a deadlocked duel: back away (toward allies) for a moment before anything else.
+  if (state.time < ai.breakUntil) {
+    const foe = ai.ignoreId !== null ? state.entities[ai.ignoreId] : null;
+    if ((ai.state !== 'FLEE' || !ai.goal) && foe && foe.alive && !foe.jailed) flee(state, e, foe);
+    if (ai.state === 'FLEE' && ai.goal) return;
+    ai.breakUntil = 0;
+  }
   const leader = leaderOf(state, e);
   if (leader && squadThink(state, e, leader, aggro)) return;
   switch (e.role) {
@@ -830,6 +927,7 @@ function opportunisticCapture(state: GameState, e: Entity): void {
   const d = dist(t, e) || 1;
   if ((e.dirX * (t.x - e.x) + e.dirZ * (t.z - e.z)) / d < 0.3) return;
   if (!visibleEnemies(state, e).includes(t)) return;
+  e.ai.grabAt = state.time;
   attemptCapture(state, e);
 }
 
@@ -838,8 +936,9 @@ export function aiTick(state: GameState, e: Entity, dt: number, aggro: number): 
   const now = state.time;
   if (!e.alive || e.jailed) return;
   if (e.y > 20) e.ai.highSec += dt;
-  if (e.channeling || e.stunUntil > now) { e.speed = 0; return; }
   const ai = e.ai;
+  // Busy (aiming a shot, opening a lock, stunned): standing still on purpose is not being stuck.
+  if (e.channeling || e.stunUntil > now) { e.speed = 0; ai.progressAt = now; bodyMoved(e, now); return; }
   if (now >= ai.perceiveAt) {
     ai.perceiveAt = now + PERCEIVE_MS + ((e.id * 37) % 60);
     perceive(state, e);
@@ -850,6 +949,7 @@ export function aiTick(state: GameState, e: Entity, dt: number, aggro: number): 
   }
   const speed = AI_SPEED * e.gait * speedMul(state) * (e.sprintUntil > now ? SPRINT_SPEED : 1) * speedFor(ai.state) * (e.role === 'king' && ai.state !== 'FLEE' ? 0.75 : 1);
   e.movedThisStep = false;
+  let following = false;
   // Close pursuit steers straight at the live position (only while it is in view).
   const t = ai.targetId !== null ? state.entities[ai.targetId] : null;
   const glimpse = noticing(state, e);
@@ -857,7 +957,7 @@ export function aiTick(state: GameState, e: Entity, dt: number, aggro: number): 
     // Something caught its eye but it has not reacted yet: stop and look (a tell for the player).
     turnToward(e, glimpse.x - e.x, glimpse.z - e.z, AI_TURN_RATE * 0.6 * dt);
   } else if (ai.state === 'CHASE' && t && ai.visible.includes(t.id) && dist(e, t) < 170 && Math.abs(t.y - e.y) < SAME_LEVEL) {
-    moveToward(e, t.x - t.dirX * 30, t.z - t.dirZ * 30, dt, speed);
+    closeChase(e, t, dt, speed);
     ai.progressAt = now;
   } else if (ai.state === 'SQUAD' && leaderOf(state, e)) {
     squadMove(state, e, leaderOf(state, e)!, dt);
@@ -869,11 +969,129 @@ export function aiTick(state: GameState, e: Entity, dt: number, aggro: number): 
     // Pausing: look left and right before moving on.
     turnBy(e, Math.sin(now / 650 + e.id) * 1.1 * dt);
     ai.progressAt = now;
-  } else follow(state, e, dt, speed);
+  } else { follow(state, e, dt, speed); following = true; }
+  if (!following) bodyMoved(e, now);
   if (!e.movedThisStep) accelerate(e, 0, dt);
   // Standing still with something to aim at: swing round smoothly.
   if (!ai.path && ai.lookAt) turnToward(e, ai.lookAt.x - e.x, ai.lookAt.z - e.z, AI_TURN_RATE * dt);
   opportunisticCapture(state, e);
+  watchDuel(state, e);
+}
+
+// ---------------------------------------------------------------- chase deadlock (AI QUALITY PHASE 1)
+
+/** Out to this distance from the target it goes round at, when it is in front of the target. */
+const ROUND_R = 58;
+
+/**
+ * Close pursuit: get to the target's back. Aiming straight at the spot behind it (as before) only
+ * works from behind: from in front, that line runs through the target, so the chaser pushed into its
+ * face, or — against a chaser doing the same — two AIs circled each other at ~53 for minutes, each at
+ * the other's side but never turned toward it (an AI only grabs what it faces). Against another AI it
+ * now goes round at a little distance while in front, and turns in to grab once it is at the side or
+ * back. The capture itself is unchanged (still never from the front). Against a person it steers as
+ * it always did.
+ */
+function closeChase(e: Entity, t: Entity, dt: number, speed: number): void {
+  if (isHuman(t)) { moveToward(e, t.x - t.dirX * 30, t.z - t.dirZ * 30, dt, speed); return; }
+  const d = dist(e, t) || 1;
+  if (captureTier(t, e) !== 'front' && d < CAP_RANGE * 0.75) { moveToward(e, t.x, t.z, dt, speed); return; }
+  // In front of it: step round the shorter way, toward its back (the other way if a wall is there).
+  const a0 = Math.atan2(e.x - t.x, e.z - t.z);
+  let gx = t.x - t.dirX * 30, gz = t.z - t.dirZ * 30, best = Infinity;
+  for (const s of [-0.9, 0.9]) {
+    const x = t.x + Math.sin(a0 + s) * ROUND_R, z = t.z + Math.cos(a0 + s) * ROUND_R;
+    const facing = Math.sin(a0 + s) * t.dirX + Math.cos(a0 + s) * t.dirZ;
+    if (facing < best && !blocked(x, z, e.y)) { best = facing; gx = x; gz = z; }
+  }
+  moveToward(e, gx, gz, dt, speed);
+}
+
+/** Close pursuit of the same target this long without a single grab attempt: it is not working. */
+const CLOSE_GIVE_UP_MS = 8000;
+/** Out of reach (or lost from view) this long does not end a close pursuit (hysteresis). */
+const CLOSE_GRACE_MS = 3000;
+
+/**
+ * Whatever the reason a close pursuit gets nowhere (the target backed against a wall or a
+ * building, up on a ledge just out of reach, always turning to face the chaser), it does not
+ * go on for ever: after CLOSE_GIVE_UP_MS near it without a grab attempt the chaser lets that
+ * target go for a while and does something else. True when it gave up. (Against a person the
+ * pursuit is left as it was.)
+ */
+function giveUpClose(state: GameState, e: Entity, t: Entity): boolean {
+  const ai = e.ai, now = state.time;
+  if (isHuman(t) || dist(e, t) > 170) return false;
+  if (ai.closeWith !== t.id || now - ai.closeSeen > CLOSE_GRACE_MS) { ai.closeWith = t.id; ai.closeSince = now; }
+  ai.closeSeen = now;
+  if (now - ai.closeSince < CLOSE_GIVE_UP_MS || now - ai.grabAt < CLOSE_GIVE_UP_MS) return false;
+  ai.closeWith = null;
+  ai.ignoreId = t.id;
+  ai.ignoreUntil = now + IGNORE_MS;
+  ai.targetId = null;
+  stop(e, 'PATROL');
+  return true;
+}
+
+/** A close mutual chase this long (with neither getting round) is a deadlock. */
+const DUEL_MS = 3000;
+/** A gap this short in the mutual chase does not reset the clock (hysteresis). */
+const DUEL_GRACE_MS = 1000;
+/** Breaking off: back away this long, then leave that enemy alone this long. */
+const BREAK_MS = 2600;
+const IGNORE_MS = 7000;
+/** A second deadlock with the same enemy within this time ends the chase on both sides. */
+const DUEL_MEMORY_MS = 30000;
+
+/** Friends minus foes around a character (not counting the pair itself): who is better placed to stay. */
+function support(state: GameState, e: Entity, foe: Entity): number {
+  let n = 0;
+  for (const o of state.entities) {
+    if (o === e || o === foe || !o.alive || o.jailed || Math.hypot(o.x - e.x, o.z - e.z) > 400) continue;
+    n += o.nation === e.nation ? 1 : o.nation === foe.nation ? -1 : 0;
+  }
+  return n;
+}
+
+/**
+ * Notices a deadlock: two AIs chasing each other at close range for DUEL_MS without either getting
+ * round. Then one of them (the one with less support around it) breaks off toward its friends and
+ * calls them in; the other keeps the chase — with its opponent turning away, it can get round.
+ * Meeting the same enemy in a deadlock again soon after, both give up on each other for a while.
+ */
+function watchDuel(state: GameState, e: Entity): void {
+  const ai = e.ai, now = state.time;
+  const t = ai.targetId !== null ? state.entities[ai.targetId] : null;
+  const locked = !!t && ai.state === 'CHASE' && !isHuman(t) && t.alive && !t.jailed && t.ai.targetId === e.id
+    && (t.ai.state === 'CHASE' || t.ai.state === 'INTERCEPT') && dist(e, t) < 130 && Math.abs(t.y - e.y) < SAME_LEVEL;
+  if (locked) {
+    if (ai.duelWith !== t.id || now - ai.duelSeen > DUEL_GRACE_MS) { ai.duelWith = t.id; ai.duelSince = now; }
+    ai.duelSeen = now;
+  }
+  if (!locked || now - ai.duelSince < DUEL_MS) return;
+  const fresh = (x: Entity) => (now - x.ai.duelAt < DUEL_MEMORY_MS ? x.ai.duelCount : 0);
+  const again = fresh(e) > 0 && fresh(t) > 0 && (e.ai.ignoreId === t.id || t.ai.ignoreId === e.id);
+  const se = support(state, e, t), stt = support(state, t, e);
+  const breakers = again ? [e, t] : [se < stt ? e : stt < se ? t : state.rng() < 0.5 ? e : t];
+  for (const x of [e, t]) {
+    x.ai.duelCount = fresh(x) + 1;
+    x.ai.duelAt = now;
+    x.ai.duelWith = null;
+    x.ai.duelSeen = -Infinity;
+  }
+  for (const b of breakers) {
+    const foe = b === e ? t : e;
+    b.ai.breakUntil = now + BREAK_MS;
+    b.ai.ignoreId = foe.id;
+    b.ai.ignoreUntil = now + BREAK_MS + IGNORE_MS;
+    flee(state, b, foe);
+    // Calls the others in: rangers answer the latest fight (see respond).
+    state.factions[b.nation].fight = { x: b.x, y: b.y, z: b.z, t: now };
+  }
+  if (!again) {
+    const stayer = breakers[0] === e ? t : e;
+    state.factions[stayer.nation].fight = { x: stayer.x, y: stayer.y, z: stayer.z, t: now };
+  }
 }
 
 /** A leader's follower is far behind (on the same level). */
