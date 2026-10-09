@@ -68,7 +68,9 @@ describe('map: nothing overlaps', () => {
       }
     }
     // Landmark grounds (palace, hills) carry their own ramps and buildings on top: allowed.
-    expect(clash.filter((c) => !/palace|keep|hill|museum|tokyoTower|footTown|dietTower|walkup|arcade|stadium/.test(c))).toEqual([]);
+    // 東京タワー only: a stair's side rail stands on the edge of that stair (both groups exist only inside its area).
+    const towerStairRail = /^[a-z]+:ttwStair@\(-?\d+,-?\d+\) × metal:ttwRail@/;
+    expect(clash.filter((c) => !/palace|keep|hill|museum|tokyoTower|footTown|dietTower|walkup|arcade|stadium/.test(c) && !towerStairRail.test(c))).toEqual([]);
   });
 
   it('traffic signals do not stand inside footbridge stairs', () => {

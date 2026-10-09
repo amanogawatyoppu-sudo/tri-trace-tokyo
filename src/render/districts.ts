@@ -43,7 +43,8 @@ export const DISTRICT_LOOKS: readonly DistrictLook[] = [
   // 秋葉原 (v10 ELECTRIC GRID): white, violet-leaning electric blue, green, a little red — no LUNA sky blue or STAR yellow.
   { palette: [...AKIBA_LIGHTS], signs: 3.0, shape: 'screen', crown: 0.3, masts: 0.15 }, // 秋葉原
   { palette: [0xffe2a0, 0xffffff], signs: 0.5, shape: 'band', crown: 1, masts: 0.4 }, // 中央
-  { palette: [0xff3b30, 0xffa060, 0xffffff], signs: 1.0, shape: 'band', crown: 0.6, masts: 0.2 }, // 東京タワー
+  // 東京タワー (RED HEIGHT): warm white, pale stone white, a little deep red — no orange, no bright red signs.
+  { palette: [0xfff0d8, 0xe8e2d6, 0xb3262c], signs: 0.5, shape: 'band', crown: 0.35, masts: 0.2 }, // 東京タワー
   { palette: [0x9ff3ff, 0xffffff, 0x5a8bff], signs: 0.9, shape: 'band', crown: 0.9, masts: 0.3 }, // 品川
 ];
 

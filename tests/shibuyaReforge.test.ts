@@ -3,7 +3,7 @@ import { BUILDINGS, LIGHTS, POLES, SHIBUYA_BUILT, STREET_SEGS, WORLD, insideLoop
 import { MAZE, MAZE_MAP, SKY_DECKS, SKY_H, SKY_STAIRS } from '../src/config/shibuya';
 import { JAIL_SITES, BASE_SITES } from '../src/config/map';
 import { NATIONS } from '../src/config/nations';
-import { inAkihabara, inBunkyo, inShinagawa, inUeno } from './helpers';
+import { inAkihabara, inBunkyo, inShinagawa, inTokyoTower, inUeno } from './helpers';
 import { inIkebukuro } from '../src/config/ikebukuro';
 import { planPath } from '../src/ai/nav';
 import { SECTORS, sectorPoint } from '../src/sim/war';
@@ -19,14 +19,14 @@ import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/system
  * tests/shinagawaReforge.test.ts) are left out as well; the hashes were taken on map-reforge-base
  * (bbe30ec) with all six areas left out (the same values as on v9.2).
  */
-// 文京 (tests/bunkyoReforge.test.ts) is left out as well since map-reforge-bunkyo; re-taken on 897dc77 with it left out.
-const OUTSIDE = { world: 'f7afa802', lights: '726d1ba8', buildings: '289663af', poles: 'a3697592', n: 554 };
+// 文京・東京タワー (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts) are left out as well since map-reforge-all9; re-taken on 897dc77 with both left out.
+const OUTSIDE = { world: '3837e1f1', lights: 'b10da1da', buildings: 'cd5dd591', poles: 'a3697592', n: 533 };
 const inShinjuku = (p: { x: number; z: number }) => p.x > -3600 && p.x < -2160 && p.z > -2270 && p.z < -640;
 const outsideShibuya = (p: { x: number; z: number }) => !(p.x > -3600 && p.x < -1894 && p.z > 1190 && p.z < 2700);
 /** Shinjuku's new pieces (deck, stairs) are all left out too: the garden stair reaches past the area's edge. */
 const newInShinjuku = (p: { group?: string }) => p.group === 'sjdeck' || p.group === 'shinjuku';
 const outside = (p: { x: number; z: number; group?: string }) =>
-  outsideShibuya(p) && !inShinjuku(p) && !newInShinjuku(p) && !inAkihabara(p) && !inUeno(p) && !inIkebukuro(p.x, p.z) && !inShinagawa(p) && !inBunkyo(p);
+  outsideShibuya(p) && !inShinjuku(p) && !newInShinjuku(p) && !inAkihabara(p) && !inUeno(p) && !inIkebukuro(p.x, p.z) && !inShinagawa(p) && !inBunkyo(p) && !inTokyoTower(p);
 /** FNV-1a over the JSON (enough to notice any change). */
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);

@@ -3,6 +3,7 @@ import { AKIBA_ZONES } from '../src/config/akihabara';
 import { inUenoZone } from '../src/config/ueno';
 import { SHINAGAWA_ZONE } from '../src/config/shinagawa';
 import { inBunkyoZone } from '../src/config/bunkyo';
+import { inTokyoTowerZone } from '../src/config/tokyoTower';
 import type { NationId } from '../src/config/nations';
 import { NATIONS } from '../src/config/nations';
 import type { RoleId, RosterSize } from '../src/config/roles';
@@ -63,4 +64,9 @@ export function inShinagawa(p: { x: number; z: number }): boolean {
 /** Inside the rebuilt area of Bunkyo (MAP REFORGE parallel D, QUIET SLOPES). */
 export function inBunkyo(p: { x: number; z: number }): boolean {
   return inBunkyoZone(p.x, p.z);
+}
+
+/** Inside the rebuilt area of 東京タワー (MAP REFORGE parallel E: RED HEIGHT). */
+export function inTokyoTower(p: { x: number; z: number }): boolean {
+  return inTokyoTowerZone(p.x, p.z);
 }

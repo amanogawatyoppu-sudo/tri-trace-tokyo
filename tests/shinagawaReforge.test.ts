@@ -9,7 +9,7 @@ import { NATIONS } from '../src/config/nations';
 import { planPath } from '../src/ai/nav';
 import { sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
-import { inBunkyo, inShinagawa, inUeno } from './helpers';
+import { inBunkyo, inShinagawa, inTokyoTower, inUeno } from './helpers';
 import { inIkebukuro } from '../src/config/ikebukuro';
 
 /**
@@ -38,7 +38,7 @@ const clearance = (x: number, z: number) => {
 describe('Shinagawa reforge: everything outside the district is untouched', () => {
   it('leaves every primitive, lamp, building, pole, street, crossing, block and signal outside the area exactly as on map-reforge-base', () => {
     // Ueno and Ikebukuro (the other parallel reforges, merged in map-reforge-parallel-integrated) are left out too.
-    const out = (p: { x: number; z: number }) => !inShinagawa(p) && !inUeno(p) && !inIkebukuro(p.x, p.z) && !inBunkyo(p);
+    const out = (p: { x: number; z: number }) => !inShinagawa(p) && !inUeno(p) && !inIkebukuro(p.x, p.z) && !inBunkyo(p) && !inTokyoTower(p);
     const o = <T extends { x: number; z: number }>(a: readonly T[]) => a.filter(out);
     expect({
       world: hash(o(WORLD)), lights: hash(o(LIGHTS)), buildings: hash(o(BUILDINGS)), poles: hash(o(POLES)), streets: hash(o(STREET_SEGS)),
@@ -46,9 +46,9 @@ describe('Shinagawa reforge: everything outside the district is untouched', () =
       signals: hash(o(SIGNALS)), zebra: hash(o(CROSSWALKS)), parking: hash(o(PARKINGS)), n: o(WORLD).length,
     }).toEqual({
       // Taken on map-reforge-base (bbe30ec: 渋谷 + 新宿 + 秋葉原) before 品川 was touched, with 上野 and 池袋 left out;
-      // re-taken on 897dc77 with 文京 (map-reforge-bunkyo) left out as well.
-      world: '7d339c70', lights: '4f4f6f9f', buildings: 'ea8eb01c', poles: '2ef56886', streets: '38058f19',
-      crossings: '835eb799', blocks: '7631b23', signals: '7cc2214f', zebra: '1d7d62a1', parking: '96f01396', n: 767,
+      // re-taken on 897dc77 with 文京 and 東京タワー left out as well (map-reforge-all9).
+      world: '6583895f', lights: '9ba6b169', buildings: 'e3e0c97a', poles: '2ef56886', streets: '38058f19',
+      crossings: '27a82455', blocks: '7631b23', signals: '906d6319', zebra: 'a745170a', parking: '96f01396', n: 746,
     });
   });
 

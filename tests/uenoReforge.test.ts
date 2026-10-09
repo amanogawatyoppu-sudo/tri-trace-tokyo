@@ -13,7 +13,7 @@ import { inLight } from '../src/sim/night';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
 import { inIkebukuro } from '../src/config/ikebukuro';
-import { inBunkyo, inShinagawa } from './helpers';
+import { inBunkyo, inShinagawa, inTokyoTower } from './helpers';
 
 /**
  * MAP REFORGE (parallel A): 上野 GREEN HEIGHTS (layout in config/ueno.ts). Everything outside the
@@ -23,9 +23,9 @@ import { inBunkyo, inShinagawa } from './helpers';
  * taken on bbe30ec with all three areas left out.
  */
 const UENO = 4;
-// 文京 (tests/bunkyoReforge.test.ts) is left out as well since map-reforge-bunkyo; re-taken on 897dc77 with it left out.
+// 文京・東京タワー (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts) are left out as well since map-reforge-all9; re-taken on 897dc77 with both left out.
 const BEFORE = {
-  world: '7d339c70', n: 767, lights: '4f4f6f9f', buildings: 'ea8eb01c', poles: '2ef56886', wires: '52cd249d', streets: '77583c1e', places: 'b6abbd6c',
+  world: '6583895f', n: 746, lights: '9ba6b169', buildings: 'e3e0c97a', poles: '2ef56886', wires: '52cd249d', streets: '90a318bf', places: 'ad4d1ea1',
 };
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);
@@ -34,7 +34,7 @@ const hash = (v: unknown) => {
   return h.toString(16);
 };
 /** The other parallel reforges (池袋, 品川, 文京). */
-const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p) || inBunkyo(p);
+const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p) || inBunkyo(p) || inTokyoTower(p);
 const out = (p: { x: number; z: number }) => !inUenoZone(p.x, p.z) && !others(p);
 const mine = (p: Prim) => inUenoZone(p.x, p.z);
 /** Solids someone on the ground walks into (not floors, not water, not the hill's own terrain). */
@@ -48,7 +48,7 @@ describe('Ueno reforge: the rest of Tokyo is untouched', () => {
       world: hash(WORLD.filter(out)), n: WORLD.filter(out).length, lights: hash(LIGHTS.filter(out)), buildings: hash(BUILDINGS.filter((b) => (b.outside || !inUenoZone(b.x, b.z)) && !others(b))),
       poles: hash(POLES.filter(out)), wires: hash(WIRES.filter(([a, b]) => out(POLES[a]) && out(POLES[b])).map(([a, b]) => [POLES[a], POLES[b]])),
       streets: hash([STREET_SEGS.filter(out), INTERSECTIONS.filter(out), CROSSWALKS.filter(out), SIGNALS.filter(out), BLOCKS.filter(blk), PARKINGS.filter(out), FOOTBRIDGES]),
-      places: hash([BASE_SITES, JAIL_SITES, SECTORS.filter((s) => s.id !== UENO).map((s) => sectorPoint(s.id))]),
+      places: hash([BASE_SITES, JAIL_SITES, SECTORS.filter((s) => s.id !== UENO && !inTokyoTower(s.pointNear)).map((s) => sectorPoint(s.id))]),
     }).toEqual(BEFORE);
   });
 

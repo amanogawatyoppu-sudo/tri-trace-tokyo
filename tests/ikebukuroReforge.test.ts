@@ -5,7 +5,7 @@ import { NATIONS } from '../src/config/nations';
 import { navGraph, planPath } from '../src/ai/nav';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { STEP_UP, blocked, canWalk, lineOfSight, supportHeight } from '../src/sim/systems/world';
-import { inBunkyo, inShinagawa, inUeno } from './helpers';
+import { inBunkyo, inShinagawa, inTokyoTower, inUeno } from './helpers';
 
 /** MAP REFORGE: Ikebukuro rebuilt as the ROOFTOP NETWORK (layout in config/ikebukuro.ts). */
 
@@ -14,12 +14,12 @@ import { inBunkyo, inShinagawa, inUeno } from './helpers';
  * Ueno and Shinagawa (the other parallel reforges, merged in map-reforge-parallel-integrated) are left
  * out too; the hashes were taken on bbe30ec with all three areas left out.
  */
-// 文京 (tests/bunkyoReforge.test.ts) is left out as well since map-reforge-bunkyo; re-taken on 897dc77 with it left out.
+// 文京・東京タワー (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts) are left out as well since map-reforge-all9; re-taken on 897dc77 with both left out.
 const OUTSIDE = {
-  world: '7d339c70', lights: '4f4f6f9f', buildings: 'ea8eb01c', poles: '2ef56886', signals: '7cc2214f',
-  crosswalks: '1d7d62a1', parkings: '96f01396', streets: '38058f19', blocks: '7631b23', n: 767,
+  world: '6583895f', lights: '9ba6b169', buildings: 'e3e0c97a', poles: '2ef56886', signals: '906d6319',
+  crosswalks: 'a745170a', parkings: '96f01396', streets: '38058f19', blocks: '7631b23', n: 746,
 };
-const outside = (p: { x: number; z: number }) => !inIkebukuro(p.x, p.z) && !inUeno(p) && !inShinagawa(p) && !inBunkyo(p);
+const outside = (p: { x: number; z: number }) => !inIkebukuro(p.x, p.z) && !inUeno(p) && !inShinagawa(p) && !inBunkyo(p) && !inTokyoTower(p);
 /** FNV-1a over the JSON (enough to notice any change). */
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);
