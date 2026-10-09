@@ -232,7 +232,8 @@ export function buildChuo(scene: THREE.Scene): ChuoStats {
     pave.name = 'chuo';
     scene.add(pave);
   }
-  // B. RING ROUTE: a darker lane edged by thin green lines (inner edge continuous, outer edge dashed).
+  // B. RING ROUTE: a darker lane edged by thin continuous green lines (its whole language: unbroken green;
+  // the CONTROL PASSAGE uses short dashes and arrows instead).
   for (const l of RING_LANES) ground.push(tint(flat(rw(l), rd(l), cx(l), 0.5, cz(l)), 0x4c535a));
   {
     // The SE turn (from the east lane round the halls' cut corner into the south lane, along the fence).
@@ -246,24 +247,12 @@ export function buildChuo(scene: THREE.Scene): ChuoStats {
     [926, 406, 1080, 406], [1240, 406, 1360, 406], [926, 1014, 1080, 1014], [1240, 1014, 1360, 1014],
     [926, 406, 926, AXIS.z0], [926, AXIS.z1, 926, 1014], [1644, 480, 1644, 940],
   ] as [number, number, number, number][]) floorLines.push(tint(line(ax, az, bx, bz, 4, 0.9), GREEN));
-  const dash = (ax: number, az: number, bx: number, bz: number) => {
-    const len = Math.hypot(bx - ax, bz - az), n = Math.floor(len / 60);
-    for (let k = 0; k < n; k++) {
-      const t0 = (k * 60) / len, t1 = (k * 60 + 30) / len;
-      floorLines.push(tint(line(ax + (bx - ax) * t0, az + (bz - az) * t0, ax + (bx - ax) * t1, az + (bz - az) * t1, 3, 0.9), GREEN));
-    }
-  };
-  dash(RING.x0 + 14, RING.z0 + 14, 1740, RING.z0 + 14);
-  dash(RING.x0 + 14, RING.z0 + 14, RING.x0 + 14, RING.z1 - 14);
-  dash(RING.x0 + 14, RING.z1 - 14, 1560, RING.z1 - 14);
-  dash(DATA_WALL.x0 - 14, RING.z0 + 14, DATA_WALL.x0 - 14, DATA_WALL.z1);
-  // Ring chevrons (clockwise) at the corners: you can tell the ring from the axis at a glance.
-  for (const [x, z, ang] of [[880, 360, 0], [1690, 360, Math.PI / 2], [1700, 880, Math.PI], [880, 1060, -Math.PI / 2], [1300, 360, 0], [1300, 1060, Math.PI]] as [number, number, number][]) {
-    for (const s of [-1, 1]) {
-      const dx = Math.cos(ang), dz = Math.sin(ang), px = -dz, pz = dx;
-      floorLines.push(tint(line(x - dx * 14 + px * s * 18, z - dz * 14 + pz * s * 18, x + dx * 6, z + dz * 6, 5, 0.95), GREEN));
-    }
-  }
+  // The outer edge: a second continuous green line, round the lane's corners and the SE turn by the tracks.
+  const ringOuter: [number, number][] = [
+    [RING.x0 + 14, RING.z1 - 14], [RING.x0 + 14, RING.z0 + 14], [DATA_WALL.x0 - 14, RING.z0 + 14], [DATA_WALL.x0 - 14, DATA_WALL.z1],
+    [edgeX(DATA_WALL.z1 + 60) - 14, DATA_WALL.z1 + 60], [edgeX(1000) - 14, 1000], [1600, RING.z1 - 14], [RING.x0 + 14, RING.z1 - 14],
+  ];
+  for (let i = 0; i < ringOuter.length - 1; i++) floorLines.push(tint(line(...ringOuter[i], ...ringOuter[i + 1], 3, 0.9), GREEN));
   // A. CORE AXIS: a paler strip between two white lines from the west edge to the core, chevrons pointing at it.
   {
     const A = AXIS, z0 = A.z0 + 6, z1 = A.z1 - 6;
@@ -368,11 +357,38 @@ export function buildChuo(scene: THREE.Scene): ChuoStats {
       // Rack fronts (the faces along the passage) carry the status lights.
       for (const s of [-1, 1]) clusterOf(cx(r)).signs.push(quad(rw(r) - 6, RACK_H - 14, CELLS.rack, cx(r), RACK_H / 2, cz(r) + s * (rd(r) / 2 + 0.6), 0, s));
     }
-    // The guide line on the floor: in from the ring, round the racks, out to the core.
+    // Weak floor edges so the hall's limits read under the roof by day and night: a fine light line at
+    // the foot of each wall, round each rack and each column (the layout itself is unchanged).
+    for (const w of h.walls) { const fx = w.x0 < 1500 ? w.x1 + 4 : w.x0 - 4; floorLines.push(tint(line(fx, w.z0 + 2, fx, w.z1 - 2, 1.5, 1), COOLGREY)); }
+    for (const r of h.racks) {
+      outline({ x0: r.x0 - 4, z0: r.z0 - 4, x1: r.x1 + 4, z1: r.z1 + 4 }, 1.5, 1, floorLines, COOLGREY);
+      // A weak strip of light under each rack front.
+      for (const s of [-1, 1]) glow.push(tint(boxAt(rw(r) - 6, 1.6, 0.8, cx(r), 4, cz(r) + s * (rd(r) / 2 + 0.8)), BLUEWHITE));
+    }
+    for (const [x, z] of h.pillars) {
+      outline({ x0: x - PILLAR / 2 - 5, z0: z - PILLAR / 2 - 5, x1: x + PILLAR / 2 + 5, z1: z + PILLAR / 2 + 5 }, 1.5, 1, floorLines, WHITE);
+      glow.push(tint(boxAt(PILLAR + 1.6, 1.6, PILLAR + 1.6, x, 6, z), BLUEWHITE));
+    }
+    // The way out: a white threshold across the hall's inner mouth, and short signs over it (◎ CORE seen from
+    // inside the hall, C CONTROL PASSAGE seen from the core court).
+    floorLines.push(tint(line(1362, innerZ - sgn * 4, 1598, innerZ - sgn * 4, 3, 1), WHITE));
+    signs.push(quad(84, 21, CELLS.way(3), HALL_LANES.out, HALL_ROOF - 30, innerZ - sgn * 1.6, 0, sgn));
+    signs.push(quad(84, 21, CELLS.way(2), HALL_LANES.out, HALL_ROOF - 30, innerZ + sgn * 0.4, 0, -sgn));
+    white.push(tint(boxAt(4, 14, 4, HALL_LANES.out, HALL_ROOF - 12, innerZ - sgn * 0.6), MIDGREY));
+    // The guide on the floor: short dashes and arrows (the passage's own language), in from the ring, round the racks, out to the core.
     const r0 = h.racks[0], r1 = h.racks[1];
     const L = HALL_LANES, aisle = (cz(r0) + cz(r1)) / 2;
     const path: [number, number][] = [[L.in, outerZ + sgn * 40], [L.in, aisle], [L.out, aisle], [L.out, innerZ - sgn * 34]];
-    for (let i = 0; i < path.length - 1; i++) floorLines.push(tint(line(path[i][0], path[i][1], path[i + 1][0], path[i + 1][1], 5, 1), BLUEWHITE));
+    for (let i = 0; i < path.length - 1; i++) {
+      const [ax, az] = path[i], [bx, bz] = path[i + 1], len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len;
+      for (let t = 4; t + 14 <= len; t += 26) floorLines.push(tint(line(ax + ux * t, az + uz * t, ax + ux * (t + 14), az + uz * (t + 14), 4, 1), BLUEWHITE));
+      // An arrow in the middle of each leg, pointing the way.
+      const mx = (ax + bx) / 2, mz = (az + bz) / 2, px = -uz, pz = ux;
+      for (const s2 of [-1, 1]) floorLines.push(tint(line(mx - ux * 12 + px * s2 * 12, mz - uz * 12 + pz * s2 * 12, mx + ux * 4, mz + uz * 4, 4, 1.05), WHITE));
+    }
+    // Short guide plates on the aisle's middle column (C →, both faces along the aisle).
+    const mid = h.pillars[1];
+    for (const s2 of [-1, 1]) signs.push(quad(PILLAR - 2, 10, CELLS.way(2), mid[0], 120, mid[1] + s2 * (PILLAR / 2 + 0.6), 0, s2));
     pool(cx(h) - 15, cz(h), 100, BLUEWHITE, 0.8);
   }
 
@@ -482,6 +498,29 @@ export function buildChuo(scene: THREE.Scene): ChuoStats {
       glow.push(tint(boxAt(4, 1, span - 30, C.x + sg * F.half, F.y0 - 0.6, C.z), BLUEWHITE));
       // The name on the frame's west and east faces.
       signs.push(quad(span - 40, F.y1 - F.y0 - 10, CELLS.band(0), C.x + sg * (F.half + F.col / 2 + 0.6), (F.y0 + F.y1) / 2, C.z, sg, 0));
+    }
+    // Making the core read as the core from the normal camera (no bigger, no neon): light lines on the top
+    // and bottom edges of all four frame beams and its name on all four faces; thin lit edges up the
+    // unit's corners; a white and a green line round its foot; a lit entrance on each face.
+    for (const sg of [-1, 1]) {
+      for (const y of [F.y1 + 0.8, F.y0 + 1.5]) {
+        glow.push(tint(boxAt(span + 1, 1.6, 1, C.x, y, C.z + sg * (F.half + F.col / 2 + 0.4)), y > F.y0 + 2 ? WHITE : GREEN));
+        glow.push(tint(boxAt(1, 1.6, span + 1, C.x + sg * (F.half + F.col / 2 + 0.4), y, C.z), y > F.y0 + 2 ? WHITE : GREEN));
+      }
+      signs.push(quad(span - 40, F.y1 - F.y0 - 10, CELLS.band(0), C.x, (F.y0 + F.y1) / 2, C.z + sg * (F.half + F.col / 2 + 0.6), 0, sg));
+    }
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) glow.push(tint(boxAt(1.6, U.h - 40, 1.6, C.x + sx * (U.half + 4.4), 14 + (U.h - 40) / 2, C.z + sz * (U.half + 4.4)), WHITE));
+    outline({ x0: C.x - U.half - 14, z0: C.z - U.half - 14, x1: C.x + U.half + 14, z1: C.z + U.half + 14 }, 2.5, 1.1, floorLines, WHITE);
+    outline({ x0: C.x - U.half - 22, z0: C.z - U.half - 22, x1: C.x + U.half + 22, z1: C.z + U.half + 22 }, 2, 1.1, floorLines, GREEN);
+    for (const sg of [-1, 1]) glow.push(tint(boxAt(s + 17, 1.4, 1, C.x, 12.5, C.z + sg * (s / 2 + 8.3)), GREEN), tint(boxAt(1, 1.4, s + 17, C.x + sg * (s / 2 + 8.3), 12.5, C.z), GREEN));
+    for (const [nx, nz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      // Entrance: a white portal with a light under the lintel and the ◎ CONTROL CORE plate above it.
+      const fx = C.x + nx * (U.half + 1.2), fz = C.z + nz * (U.half + 1.2), along = (w: number, hgt: number, y: number, off: number) =>
+        boxAt(nx ? 3 : w, hgt, nx ? w : 3, fx + nz * off, y, fz + nx * off);
+      white.push(tint(along(4, 46, 37, -15), FRAME), tint(along(4, 46, 37, 15), FRAME), tint(along(34, 5, 62, 0), FRAME));
+      solid.push(tint(along(26, 44, 36, 0), 0x1d2025));
+      glow.push(tint(along(24, 1.2, 58.6, 0), WHITE));
+      signs.push(quad(46, 11.5, CELLS.way(3), fx + nx * 1.8, 74, fz + nz * 1.8, nx, nz));
     }
     pool(C.x, C.z, 150, BLUEWHITE, 1.1);
   }
