@@ -13,19 +13,21 @@ import { inLight } from '../src/sim/night';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
 import { inIkebukuro } from '../src/config/ikebukuro';
-import { inBunkyo, inShinagawa, inTokyoTower } from './helpers';
+import { inBunkyo, inChuo, inShinagawa, inTokyoTower } from './helpers';
 
 /**
  * MAP REFORGE (parallel A): 上野 GREEN HEIGHTS (layout in config/ueno.ts). Everything outside the
  * rebuilt area is hashed against the map-reforge-base map (bbe30ec), taken before Ueno was touched:
  * Shibuya, Shinjuku, Akihabara and the rest of Tokyo included. Ikebukuro and Shinagawa (the other
  * parallel reforges, merged in map-reforge-parallel-integrated) are left out too, and the hashes were
- * taken on bbe30ec with all three areas left out.
+ * taken on bbe30ec with all three areas left out. Chuo (parallel F) is left out as well: retaken on
+ * map-reforge-parallel-integrated (897dc77) with all four areas left out.
  */
 const UENO = 4;
-// 文京・東京タワー (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts) are left out as well since map-reforge-all9; re-taken on 897dc77 with both left out.
+// 文京・東京タワー・中央 (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts, tests/chuoReforge.test.ts) are left out as well
+// since map-reforge-all9; re-taken on 897dc77 with all of them left out.
 const BEFORE = {
-  world: '6583895f', n: 746, lights: '9ba6b169', buildings: 'e3e0c97a', poles: '2ef56886', wires: '52cd249d', streets: '90a318bf', places: 'ad4d1ea1',
+  world: '30dada6b', n: 727, lights: '9ba6b169', buildings: '2c9fb967', poles: '33b6478', wires: 'dbda7fb5', streets: '3350a52a', places: 'ad4d1ea1',
 };
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);
@@ -33,8 +35,8 @@ const hash = (v: unknown) => {
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
   return h.toString(16);
 };
-/** The other parallel reforges (池袋, 品川, 文京). */
-const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p) || inBunkyo(p) || inTokyoTower(p);
+/** The other parallel reforges (池袋, 品川, 文京, 東京タワー, 中央). */
+const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p) || inBunkyo(p) || inTokyoTower(p) || inChuo(p);
 const out = (p: { x: number; z: number }) => !inUenoZone(p.x, p.z) && !others(p);
 const mine = (p: Prim) => inUenoZone(p.x, p.z);
 /** Solids someone on the ground walks into (not floors, not water, not the hill's own terrain). */

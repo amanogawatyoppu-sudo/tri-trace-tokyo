@@ -3,7 +3,7 @@ import { BUILDINGS, LIGHTS, POLES, SHIBUYA_BUILT, STREET_SEGS, WORLD, insideLoop
 import { MAZE, MAZE_MAP, SKY_DECKS, SKY_H, SKY_STAIRS } from '../src/config/shibuya';
 import { JAIL_SITES, BASE_SITES } from '../src/config/map';
 import { NATIONS } from '../src/config/nations';
-import { inAkihabara, inBunkyo, inShinagawa, inTokyoTower, inUeno } from './helpers';
+import { inAkihabara, inBunkyo, inChuo, inShinagawa, inTokyoTower, inUeno } from './helpers';
 import { inIkebukuro } from '../src/config/ikebukuro';
 import { planPath } from '../src/ai/nav';
 import { SECTORS, sectorPoint } from '../src/sim/war';
@@ -17,16 +17,19 @@ import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/system
  * arcade it reworks, tests/akihabaraReforge.test.ts), Ueno (parallel A, tests/uenoReforge.test.ts),
  * Ikebukuro (parallel B, tests/ikebukuroReforge.test.ts) and Shinagawa (parallel C,
  * tests/shinagawaReforge.test.ts) are left out as well; the hashes were taken on map-reforge-base
- * (bbe30ec) with all six areas left out (the same values as on v9.2).
+ * (bbe30ec) with all six areas left out (the same values as on v9.2). Chuo (parallel F,
+ * tests/chuoReforge.test.ts) is left out too: retaken on map-reforge-parallel-integrated (897dc77)
+ * with all seven areas left out.
  */
-// 文京・東京タワー (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts) are left out as well since map-reforge-all9; re-taken on 897dc77 with both left out.
-const OUTSIDE = { world: '3837e1f1', lights: 'b10da1da', buildings: 'cd5dd591', poles: 'a3697592', n: 533 };
+// 文京・東京タワー・中央 (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts, tests/chuoReforge.test.ts) are left out as well
+// since map-reforge-all9; re-taken on 897dc77 with all of them left out.
+const OUTSIDE = { world: 'c9c4d2e5', lights: 'b10da1da', buildings: 'b7a37370', poles: '115933e0', n: 514 };
 const inShinjuku = (p: { x: number; z: number }) => p.x > -3600 && p.x < -2160 && p.z > -2270 && p.z < -640;
 const outsideShibuya = (p: { x: number; z: number }) => !(p.x > -3600 && p.x < -1894 && p.z > 1190 && p.z < 2700);
 /** Shinjuku's new pieces (deck, stairs) are all left out too: the garden stair reaches past the area's edge. */
 const newInShinjuku = (p: { group?: string }) => p.group === 'sjdeck' || p.group === 'shinjuku';
 const outside = (p: { x: number; z: number; group?: string }) =>
-  outsideShibuya(p) && !inShinjuku(p) && !newInShinjuku(p) && !inAkihabara(p) && !inUeno(p) && !inIkebukuro(p.x, p.z) && !inShinagawa(p) && !inBunkyo(p) && !inTokyoTower(p);
+  outsideShibuya(p) && !inShinjuku(p) && !newInShinjuku(p) && !inAkihabara(p) && !inUeno(p) && !inIkebukuro(p.x, p.z) && !inShinagawa(p) && !inBunkyo(p) && !inTokyoTower(p) && !inChuo(p);
 /** FNV-1a over the JSON (enough to notice any change). */
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);

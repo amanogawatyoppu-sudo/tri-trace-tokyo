@@ -11,7 +11,7 @@ import { NATIONS, NATION_IDS } from '../src/config/nations';
 import { planPath } from '../src/ai/nav';
 import { POINT_R, SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
-import { inBunkyo, inTokyoTower } from './helpers';
+import { inBunkyo, inChuo, inTokyoTower } from './helpers';
 
 /**
  * MAP REFORGE parallel E: 東京タワー rebuilt as RED HEIGHT (layout in config/tokyoTower.ts).
@@ -44,8 +44,8 @@ const EYE = 40;
 
 describe('Tokyo Tower reforge: everything outside the district is untouched', () => {
   it('leaves every primitive, lamp, building, pole, wire, street, crossing, block and signal outside the area exactly as on map-reforge-parallel-integrated', () => {
-    // 文京 (parallel D) is left out as well since map-reforge-all9 (values re-taken on 897dc77 with it left out).
-    const out = (p: { x: number; z: number }) => !inTokyoTower(p) && !inBunkyo(p);
+    // 文京 (parallel D) and 中央 (parallel F) are left out as well since map-reforge-all9 (values re-taken on 897dc77 with them left out).
+    const out = (p: { x: number; z: number }) => !inTokyoTower(p) && !inBunkyo(p) && !inChuo(p);
     const o = <T extends { x: number; z: number }>(a: readonly T[]) => a.filter(out);
     expect({
       world: hash(o(WORLD)), lights: hash(o(LIGHTS)), buildings: hash(o(BUILDINGS)), poles: hash(o(POLES)),
@@ -55,8 +55,8 @@ describe('Tokyo Tower reforge: everything outside the district is untouched', ()
       places: hash([BASE_SITES, JAIL_SITES, SECTORS.filter((s) => s.id !== TOWER).map((s) => sectorPoint(s.id))]),
     }).toEqual({
       // Taken on map-reforge-parallel-integrated (897dc77: all six finished districts) before 東京タワー was touched.
-      world: '4f27ae3b', lights: '7cf33ec8', buildings: '76aef744', poles: '2ef56886', wires: '52cd249d', streets: '9b8e4e8a', crossings: '27a82455',
-      blocks: 'f52487ca', signals: '906d6319', zebra: 'a745170a', parking: '96f01396', n: 1133, places: '4712c8fa',
+      world: '3c541737', lights: '7cf33ec8', buildings: '2ff12757', poles: '33b6478', wires: 'dbda7fb5', streets: '26be8cb3', crossings: 'a21d9ffd',
+      blocks: 'f52487ca', signals: '906d6319', zebra: 'a745170a', parking: '96f01396', n: 1114, places: '4712c8fa',
     });
   });
 

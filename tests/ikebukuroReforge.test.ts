@@ -5,21 +5,23 @@ import { NATIONS } from '../src/config/nations';
 import { navGraph, planPath } from '../src/ai/nav';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { STEP_UP, blocked, canWalk, lineOfSight, supportHeight } from '../src/sim/systems/world';
-import { inBunkyo, inShinagawa, inTokyoTower, inUeno } from './helpers';
+import { inBunkyo, inChuo, inShinagawa, inTokyoTower, inUeno } from './helpers';
 
 /** MAP REFORGE: Ikebukuro rebuilt as the ROOFTOP NETWORK (layout in config/ikebukuro.ts). */
 
 /**
  * Everything outside the rebuilt zones, hashed on the base (map-reforge-base bbe30ec) before this reforge.
  * Ueno and Shinagawa (the other parallel reforges, merged in map-reforge-parallel-integrated) are left
- * out too; the hashes were taken on bbe30ec with all three areas left out.
+ * out too; the hashes were taken on bbe30ec with all three areas left out. Chuo (parallel F) is left out
+ * as well: retaken on map-reforge-parallel-integrated (897dc77) with all four areas left out.
  */
-// 文京・東京タワー (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts) are left out as well since map-reforge-all9; re-taken on 897dc77 with both left out.
+// 文京・東京タワー・中央 (tests/bunkyoReforge.test.ts, tests/tokyoTowerReforge.test.ts, tests/chuoReforge.test.ts) are left out as well
+// since map-reforge-all9; re-taken on 897dc77 with all of them left out.
 const OUTSIDE = {
-  world: '6583895f', lights: '9ba6b169', buildings: 'e3e0c97a', poles: '2ef56886', signals: '906d6319',
-  crosswalks: 'a745170a', parkings: '96f01396', streets: '38058f19', blocks: '7631b23', n: 746,
+  world: '30dada6b', lights: '9ba6b169', buildings: '2c9fb967', poles: '33b6478', signals: '906d6319',
+  crosswalks: 'a745170a', parkings: '96f01396', streets: 'd58fd48a', blocks: '7631b23', n: 727,
 };
-const outside = (p: { x: number; z: number }) => !inIkebukuro(p.x, p.z) && !inUeno(p) && !inShinagawa(p) && !inBunkyo(p) && !inTokyoTower(p);
+const outside = (p: { x: number; z: number }) => !inIkebukuro(p.x, p.z) && !inUeno(p) && !inShinagawa(p) && !inBunkyo(p) && !inTokyoTower(p) && !inChuo(p);
 /** FNV-1a over the JSON (enough to notice any change). */
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);

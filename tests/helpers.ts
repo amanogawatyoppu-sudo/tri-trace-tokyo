@@ -4,6 +4,7 @@ import { inUenoZone } from '../src/config/ueno';
 import { SHINAGAWA_ZONE } from '../src/config/shinagawa';
 import { inBunkyoZone } from '../src/config/bunkyo';
 import { inTokyoTowerZone } from '../src/config/tokyoTower';
+import { CHUO_ZONE } from '../src/config/chuo';
 import type { NationId } from '../src/config/nations';
 import { NATIONS } from '../src/config/nations';
 import type { RoleId, RosterSize } from '../src/config/roles';
@@ -69,4 +70,10 @@ export function inBunkyo(p: { x: number; z: number }): boolean {
 /** Inside the rebuilt area of 東京タワー (MAP REFORGE parallel E: RED HEIGHT). */
 export function inTokyoTower(p: { x: number; z: number }): boolean {
   return inTokyoTowerZone(p.x, p.z);
+}
+
+/** Inside the rebuilt area of Chuo (MAP REFORGE parallel F, CONTROL CORE). */
+export function inChuo(p: { x: number; z: number }): boolean {
+  const Z = CHUO_ZONE;
+  return p.x > Z.x0 && p.x < Z.x1 && p.z > Z.z0 && p.z < Z.z1;
 }
