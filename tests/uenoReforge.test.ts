@@ -13,18 +13,19 @@ import { inLight } from '../src/sim/night';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
 import { inIkebukuro } from '../src/config/ikebukuro';
-import { inShinagawa } from './helpers';
+import { inChuo, inShinagawa } from './helpers';
 
 /**
  * MAP REFORGE (parallel A): 上野 GREEN HEIGHTS (layout in config/ueno.ts). Everything outside the
  * rebuilt area is hashed against the map-reforge-base map (bbe30ec), taken before Ueno was touched:
  * Shibuya, Shinjuku, Akihabara and the rest of Tokyo included. Ikebukuro and Shinagawa (the other
  * parallel reforges, merged in map-reforge-parallel-integrated) are left out too, and the hashes were
- * taken on bbe30ec with all three areas left out.
+ * taken on bbe30ec with all three areas left out. Chuo (parallel F) is left out as well: retaken on
+ * map-reforge-parallel-integrated (897dc77) with all four areas left out.
  */
 const UENO = 4;
 const BEFORE = {
-  world: 'dcacc84f', n: 794, lights: '630bd93e', buildings: '40c9a6af', poles: '9cd049e0', wires: 'f03feef7', streets: 'abf581dd', places: 'b6abbd6c',
+  world: '594b3e67', n: 775, lights: '630bd93e', buildings: 'e4c52300', poles: 'b792db12', wires: 'a820035b', streets: '12be6cf0', places: 'b6abbd6c',
 };
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);
@@ -32,8 +33,8 @@ const hash = (v: unknown) => {
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
   return h.toString(16);
 };
-/** The other parallel reforges (池袋, 品川). */
-const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p);
+/** The other parallel reforges (池袋, 品川, 中央). */
+const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p) || inChuo(p);
 const out = (p: { x: number; z: number }) => !inUenoZone(p.x, p.z) && !others(p);
 const mine = (p: Prim) => inUenoZone(p.x, p.z);
 /** Solids someone on the ground walks into (not floors, not water, not the hill's own terrain). */

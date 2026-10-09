@@ -2,6 +2,7 @@ import { SITES } from '../src/config/map';
 import { AKIBA_ZONES } from '../src/config/akihabara';
 import { inUenoZone } from '../src/config/ueno';
 import { SHINAGAWA_ZONE } from '../src/config/shinagawa';
+import { CHUO_ZONE } from '../src/config/chuo';
 import type { NationId } from '../src/config/nations';
 import { NATIONS } from '../src/config/nations';
 import type { RoleId, RosterSize } from '../src/config/roles';
@@ -56,5 +57,11 @@ export function inUeno(p: { x: number; z: number }): boolean {
 /** Inside the rebuilt area of Shinagawa (MAP REFORGE parallel C, FUTURE GATEWAY). */
 export function inShinagawa(p: { x: number; z: number }): boolean {
   const Z = SHINAGAWA_ZONE;
+  return p.x > Z.x0 && p.x < Z.x1 && p.z > Z.z0 && p.z < Z.z1;
+}
+
+/** Inside the rebuilt area of Chuo (MAP REFORGE parallel F, CONTROL CORE). */
+export function inChuo(p: { x: number; z: number }): boolean {
+  const Z = CHUO_ZONE;
   return p.x > Z.x0 && p.x < Z.x1 && p.z > Z.z0 && p.z < Z.z1;
 }

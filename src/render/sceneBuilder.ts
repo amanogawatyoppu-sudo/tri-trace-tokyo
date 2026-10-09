@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BoxPrim, Prim, RampPrim } from '../config/map';
-import { GROUND, KANDA, LANDMARKS, LIGHTS, LOOP, MAST_H, RIVER_WIDTH, STATIONS, STOREY, TOKYO_TOWER_H, TOWER, VIADUCT, WALK_EDGE, WORLD, geo, realHeight } from '../config/map';
+import { GROUND, KANDA, LANDMARKS, LIGHTS, LOOP, RIVER_WIDTH, STATIONS, STOREY, TOKYO_TOWER_H, VIADUCT, WALK_EDGE, WORLD, geo, realHeight } from '../config/map';
 import { rampHeight } from '../sim/systems/world';
 import { brickFacadeTexture, detailNoise, stoneFacadeTexture, facadeTexture, groundTexture, latticeTexture, stoneTexture, viaductTexture } from './textures';
 import { buildCity } from './city';
@@ -12,6 +12,7 @@ import { buildAkihabara } from './akihabara';
 import { buildUeno } from './ueno';
 import { buildIkebukuro } from './ikebukuro';
 import { buildShinagawa } from './shinagawa';
+import { buildChuo } from './chuo';
 import { buildStairLights } from './stairLights';
 import { buildBases, buildLockPoints } from './objectives';
 import { NIGHT_GLOW } from './nightGlow';
@@ -317,6 +318,8 @@ function buildWorld(scene: THREE.Scene): void {
     if (p.group === 'uenoTree' || p.group === 'uenoHedge' || p.group === 'uenoWall' || p.group === 'uenoRail' || p.group === 'uenoGate' || p.group === 'uenoTrellis' || p.group === 'uenoHall') continue;
     // Shinagawa's deck, arch, forum, canopy and street props are drawn by render/shinagawa.ts.
     if (p.group?.startsWith('shg')) continue;
+    // Chuo's CONTROL CORE, ring, halls, walls and pylons are drawn by render/chuo.ts.
+    if (p.group?.startsWith('chuo')) continue;
     if (p.kind === 'ramp') { add(matKey(p), rampGeometry(p)); continue; }
     const b = p as BoxPrim;
     const h = b.y1 - b.y0, key = matKey(b);
@@ -350,25 +353,6 @@ function lattice(y0: number, y1: number, r0: number, r1: number, mat: THREE.Mate
   const uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 4 * Math.round((r0 + r1) / panel), uv.getY(i) * Math.max(1, Math.round((y1 - y0) / panel)));
   return new THREE.Mesh(g, mat);
-}
-
-/** 管制塔: a red-and-white lattice radio mast in 日比谷公園, with the owner's flag on top. */
-function buildRadioTower(scene: THREE.Scene): THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> {
-  const g = new THREE.Group();
-  g.position.set(TOWER.x, 0, TOWER.z);
-  const lat = latticeTexture();
-  const red = std(COLORS.towerRed, { map: lat, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6 });
-  const white = std(0xf1ede4, { map: lat, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6 });
-  const segs = 6, h = MAST_H / segs;
-  for (let i = 0; i < segs; i++) g.add(lattice(i * h, (i + 1) * h, 40 - i * 5, 40 - (i + 1) * 5, i % 2 ? white : red));
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 110, 6), std(COLORS.gold, { metalness: 0.6, roughness: 0.35 }));
-  pole.position.y = MAST_H + 50;
-  g.add(pole);
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(110, 66), std(0x777777, { side: THREE.DoubleSide }));
-  flag.position.set(55, MAST_H + 70, 0);
-  g.add(flag);
-  scene.add(shadowed(g));
-  return flag;
 }
 
 /** Tokyo Tower, Tokyo Station's domes, the Diet's pyramid, Tokyo Dome, and landmarks beyond the tracks. */
@@ -605,7 +589,8 @@ export function buildScene(canvas: HTMLCanvasElement): SceneRefs {
   buildWorld(scene);
   buildCity(scene);
   buildLandmarks(scene);
-  const towerMesh = buildRadioTower(scene);
+  // MAP REFORGE parallel F: 中央 CONTROL CORE (the 管制塔 is its core; the owner's flag flies on it).
+  const towerMesh = buildChuo(scene).flag;
   buildBases(scene);
   buildLockPoints(scene);
   buildDistricts(scene);

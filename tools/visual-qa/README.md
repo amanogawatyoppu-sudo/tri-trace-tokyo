@@ -43,3 +43,10 @@ compare draw calls, triangles and memory instead, and measure frame time on a de
 - `ueno-plan.qa.ts` — `OUT=x.json npx vitest run --config tools/visual-qa/vitest.qa.ts tools/visual-qa/ueno-plan.qa.ts`: prims + walkability flood fill from LUNA's base
 - `ueno-basehash.qa.ts` — prints the outside-Ueno hashes (run it on the base commit to refresh `BEFORE` in `tests/uenoReforge.test.ts`)
 - `ueno-plan.py before.json after.json out.jpg`, `ueno-sheets.py` (`UENO=<dir>`) — plan and review sheets
+
+## MAP REFORGE parallel F（中央 CONTROL CORE）
+- Spots reuse `shg-shots.cjs` (`SPOTS` in `/mnt/project-files/review-chuo/README.md`), tags `before` / `after`
+- `chuo-run30.cjs <base> <outdir> <tag> '<route json>'` — like `shg-run30.cjs`; everyone but the player is held still (中央 is nobody's home ground)
+- `chuo-perf.cjs <base> <tag>` — draw calls / triangles / frame time / memory at 6 Chuo spots, day and night (run with `AUTO0=1 TIER=0`)
+- `chuo-plan.qa.ts` — `OUT=x.json npx vitest run --config tools/visual-qa/vitest.qa.ts chuo-plan`: prims + walkability flood fill from the strategic point
+- `chuo-plan.py before.json after.json out.jpg`, `chuo-sheets.py` (`CHUO=<dir>`) — plan and review sheets

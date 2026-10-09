@@ -21,6 +21,7 @@ import { IKB_BUILDINGS, IKB_DECKS, IKB_LAMPS, IKB_PLANT, IKB_STAIRS, IKB_ZONES, 
 import type { IkbBuilding } from './ikebukuro';
 import * as SHG from './shinagawa';
 import type { ShinagawaBuilding } from './shinagawa';
+import * as CHUO from './chuo';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -1666,12 +1667,96 @@ export const SHINAGAWA_BUILT: { buildings: (ShinagawaBuilding & { h: number })[]
   for (const l of SHG.SHINAGAWA_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
 }
 
+// ---------------------------------------------------------------- 中央 CONTROL CORE (MAP REFORGE parallel F)
+/**
+ * 日比谷 round the 管制塔 is rebuilt by hand (config/chuo.ts) after the generated city, the same
+ * way as the other reforged districts: the generated pieces in the area, the radio mast and the
+ * two 霞が関 ministry blocks are taken out and CONTROL CORE put in — the core unit and its frame
+ * on the tower, CORE PLAZA, the CONTROL RING and its gates, the two CONTROL PASSAGE halls, the
+ * ring lane with its annexes and DATA WALL, the SIGNAL PYLONS along the CORE AXIS. The tower
+ * (TOWER) and the strategic point stay where they were, on open ground. Nothing here is added to
+ * BUILDINGS (the generic city renderer leaves it alone): render/chuo.ts draws every 'chuo*' group.
+ */
+export const CHUO_BUILT = { annexes: CHUO.ANNEXES.length };
+{
+  const Z = CHUO.CHUO_ZONE;
+  const inZone = (x: number, z: number) => x > Z.x0 && x < Z.x1 && z > Z.z0 && z < Z.z1;
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree', 'sidewalk']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (!inZone(p.x, p.z)) continue;
+    if ((GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car')) || p.group === 'radioTower' || p.group === 'office') prims.splice(i, 1);
+  }
+  const keep = <T,>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  const out = (p: Point) => !inZone(p.x, p.z);
+  keep(BUILDINGS, (b) => b.outside || out(b));
+  keep(PARKINGS, out);
+  keep(LIGHTS, out);
+  keep(SIGNALS, out);
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (out(p)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+  const put = (r: CHUO.ChuoRect, y1: number, group: string, extra: Partial<BoxPrim> = {}) =>
+    box((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2, r.x1 - r.x0, r.z1 - r.z0, y1, 'bldg', { group, noFloor: true, ...extra });
+
+  // CONTROL CORE: the control unit on the tower's footprint, four frame columns and the raised frame (out of reach).
+  {
+    const C = CHUO.CORE, U = CHUO.CORE_UNIT, F = CHUO.CORE_FRAME;
+    box(C.x, C.z, U.half * 2, U.half * 2, U.h, 'bldg', { group: 'chuoCore', noFloor: true });
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(C.x + sx * F.half, C.z + sz * F.half, F.col, F.col, F.y1, 'bldg', { group: 'chuoCore', noFloor: true });
+    const span = F.half * 2 + F.col;
+    for (const s of [-1, 1]) {
+      box(C.x, C.z + s * F.half, span, F.col, F.y1, 'bldg', { y0: F.y0, group: 'chuoCore', noFloor: true });
+      box(C.x + s * F.half, C.z, F.col, span, F.y1, 'bldg', { y0: F.y0, group: 'chuoCore', noFloor: true });
+    }
+  }
+  // CONTROL RING: the low control buildings round the plaza, and the gate lintels.
+  for (const b of CHUO.RING_BLOCKS) put(b, CHUO.RING_H, 'chuoRing');
+  for (const g of CHUO.GATES) {
+    const alongX = g.id !== 'west';
+    if (alongX) put({ x0: g.x0, z0: g.z0 + 20, x1: g.x1, z1: g.z1 - 20 }, CHUO.GATE_LINTEL + 24, 'chuoRing', { y0: CHUO.GATE_LINTEL });
+    else put({ x0: g.x0 + 10, z0: g.z0, x1: g.x1 - 10, z1: g.z1 }, CHUO.GATE_LINTEL + 24, 'chuoRing', { y0: CHUO.GATE_LINTEL });
+  }
+  // C. CONTROL PASSAGE halls: walls, racks, pillars, the roof (out of reach).
+  for (const h of CHUO.HALLS) {
+    for (const w of h.walls) put(w, CHUO.HALL_ROOF, 'chuoHall');
+    for (const r of h.racks) put(r, CHUO.RACK_H, 'chuoHall');
+    for (const [x, z] of h.pillars) box(x, z, CHUO.PILLAR, CHUO.PILLAR, CHUO.HALL_ROOF, 'bldg', { group: 'chuoHall', noFloor: true });
+    put(h, CHUO.HALL_ROOF + 14, 'chuoHall', { y0: CHUO.HALL_ROOF });
+  }
+  // The core's glass back wall (you see through it, you don't pass).
+  put(CHUO.CORE_BACK, CHUO.CORE_BACK.h, 'chuoBack', { mat: 'glass', seeThrough: true });
+  // DATA WALL by the tracks and the cap that closes the strip behind it.
+  put(CHUO.DATA_WALL, CHUO.DATA_WALL.h, 'chuoData');
+  put(CHUO.DATA_CAP, CHUO.DATA_CAP.h, 'chuoData');
+  // Outer annexes.
+  for (const a of CHUO.ANNEXES) put(a, floorsToHeight(a.floors), 'chuoAnnex');
+  // SIGNAL PYLONS, consoles, terraces (two steps you can walk up anywhere).
+  for (const [x, z] of CHUO.PYLONS) box(x, z, CHUO.PYLON.w, CHUO.PYLON.w, CHUO.PYLON.h, 'bldg', { group: 'chuoPylon', noFloor: true });
+  for (const c of CHUO.CONSOLES) put(c, CHUO.CONSOLE_H, 'chuoGear');
+  for (const t of CHUO.TERRACES) {
+    put(t, CHUO.TERRACE_STEP, 'chuoTerrace', { noFloor: false });
+    put(t.top, CHUO.TERRACE_STEP * 2, 'chuoTerrace', { noFloor: false, y0: CHUO.TERRACE_STEP });
+  }
+  for (const l of CHUO.CHUO_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
+}
+
 export const WORLD: readonly Prim[] = prims;
 
 /** Green and gravel areas painted on the ground (decoration). */
 export const PARKS: readonly { x: number; z: number; w: number; d: number; kind: 'park' | 'gravel' }[] = [
   { x: PALACE_PLAZA.x, z: PALACE_PLAZA.z, w: PALACE_PLAZA.w + 40, d: PALACE_PLAZA.d + 40, kind: 'gravel' },
-  { x: TOWER.x, z: TOWER.z, w: PLAZA.r * 2, d: PLAZA.r * 2, kind: 'park' },
+  { x: TOWER.x, z: TOWER.z, w: PLAZA.r * 2, d: PLAZA.r * 2, kind: 'gravel' }, // 中央 CORE PLAZA (paved since CONTROL CORE)
   { x: GYOEN.x, z: GYOEN.z, w: GYOEN.w, d: GYOEN.d, kind: 'park' },
   { x: STADIUM.x, z: STADIUM.z + 60, w: STADIUM.W - 2 * STADIUM.T, d: STADIUM.D - 2 * STADIUM.T, kind: 'park' },
   { x: UENO_HILL.x, z: UENO_HILL.z, w: UENO_HILL.w + 200, d: UENO_HILL.d + 200, kind: 'park' },
