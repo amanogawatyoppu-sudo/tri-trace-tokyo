@@ -196,6 +196,32 @@ describe('Tokyo Tower reforge: C. SERVICE SLOPE', () => {
   });
 });
 
+describe('Tokyo Tower reforge: what the shared files let through', () => {
+  it('dims only Tokyo Tower\'s strategic point (render/warView.ts tests the point against SKY PLAZA)', () => {
+    for (const s of SECTORS) {
+      const p = sectorPoint(s.id);
+      expect(inRect(SKY_PLAZA, p.x, p.z), `${s.name}`).toBe(s.id === TOWER);
+    }
+  });
+
+  it('lets through only rails standing on the edge of their own stair (tests/map.test.ts)', () => {
+    const rails = WORLD.filter((w) => w.group === 'ttwRail'), stairs = WORLD.filter((w) => w.group === 'ttwStair');
+    let n = 0;
+    for (const r of rails) {
+      for (const s of stairs) {
+        if (Math.abs(r.x - s.x) >= (r.w + s.w) / 2 - 2 || Math.abs(r.z - s.z) >= (r.d + s.d) / 2 - 2) continue;
+        n++;
+        // The rail is a thin strip along one of the stair's sides (or across its high end), inside its footprint.
+        const alongX = r.w > r.d;
+        const edge = alongX ? Math.min(Math.abs(r.z - (s.z - s.d / 2)), Math.abs(r.z - (s.z + s.d / 2))) : Math.min(Math.abs(r.x - (s.x - s.w / 2)), Math.abs(r.x - (s.x + s.w / 2)));
+        expect(edge, `rail at ${r.x},${r.z} on stair at ${s.x},${s.z}`).toBeLessThanOrEqual(4);
+        expect(inTokyoTower(r) && inTokyoTower(s)).toBe(true);
+      }
+    }
+    expect(n).toBeGreaterThan(0);
+  });
+});
+
 describe('Tokyo Tower reforge: safety', () => {
   it('leaves nobody stuck: every walkable spot in the district has a way to the strategic point', () => {
     const p = sectorPoint(TOWER);

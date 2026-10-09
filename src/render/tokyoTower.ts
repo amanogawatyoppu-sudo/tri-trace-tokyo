@@ -31,10 +31,10 @@ import { latticeTexture, sharedFacadeTexture, stoneTexture } from './textures';
  */
 
 const C = {
-  red: TOWER_RED, white: TOWER_WHITE, redDark: 0x6e1418,
+  red: TOWER_RED, redLattice: 0x8a1a20, white: TOWER_WHITE, redDark: 0x6e1418,
   wall: 0x5d5f62, wallDark: 0x46484b, stone: 0x7c7770, coping: 0xa59e92, pave: 0x9a948a, plaza: 0x8e897f,
   axis: 0x4a4c50, axisEdge: 0x9d978c, inlay: 0x7c1a20, grass: 0x3d5a2d, grassDark: 0x324c26, hedge: 0x2c4627, gravel: 0x857e70,
-  steel: 0x25272a, steelLight: 0x4b4f55, service: 0x6e7175, wood: 0x6b4a30, lane: 0x77746e,
+  padGlow: 0x5e5648, parapetCap: 0x8c867b, steel: 0x25272a, steelLight: 0x4b4f55, service: 0x6e7175, wood: 0x6b4a30, lane: 0x77746e,
 };
 const [WARM, RED_LIGHT, WARM_GREY] = TTW_LIGHTS;
 
@@ -102,6 +102,21 @@ function slabTexture(seed: number, base: number): THREE.CanvasTexture {
 }
 
 /** SERVICE WALL's skin: concrete panels, louvre bands, a few pipes and stencilled numbers (1 tile ≈ 240 × 240). */
+/** Railing infill: thin uprights and a mid rail (not the tower's cross-braced lattice, which read as scaffolding). */
+function railTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 64, 64);
+  g.fillStyle = '#ffffff';
+  for (const x of [0, 32]) g.fillRect(x, 0, 5, 64);
+  g.fillRect(0, 30, 64, 4);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 function serviceTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -268,10 +283,12 @@ function arch(ax: number, az: number, bx: number, bz: number, y0: number, top: n
   return g;
 }
 
-function buildTower(flood: { value: number }, add: (...o: THREE.Object3D[]) => void): void {
+function buildTower(flood: { value: number }, redLift: { value: number }, add: (...o: THREE.Object3D[]) => void): void {
   const lat = latticeTexture();
-  const mk = (color: number) => floodlit(new THREE.MeshStandardMaterial({ color, map: lat, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.15 }), flood);
-  const red = mk(C.red), white = mk(C.white);
+  const mk = (color: number, u = flood) => floodlit(new THREE.MeshStandardMaterial({ color, map: lat, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.05 }), u);
+  // The red steel: a shade lighter than the solid parts and lifted a little by day (its shaded side
+  // stays red against the grey towers behind it); at night the same floodlight as the white.
+  const red = mk(C.redLattice, redLift), white = mk(C.white);
   const reds: THREE.BufferGeometry[] = [], whites: THREE.BufferGeometry[] = [];
   // The legs: from the footings (±200) leaning in to the body at 700, and the arches between them.
   const LEG_TOP = 700, BODY_R = 140;
@@ -289,7 +306,7 @@ function buildTower(flood: { value: number }, add: (...o: THREE.Object3D[]) => v
   ];
   stages.forEach(([y0, y1, r0, r1], i) => (i % 2 ? whites : reds).push(lattice(y0, y1, r0, r1)));
   // Belts: a solid band round the body where the legs meet it (the first platform level).
-  const solidRed = floodlit(new THREE.MeshStandardMaterial({ color: C.red, roughness: 0.55, metalness: 0.15 }), flood);
+  const solidRed = floodlit(new THREE.MeshStandardMaterial({ color: C.red, roughness: 0.55, metalness: 0.05 }), redLift);
   const solidWhite = floodlit(new THREE.MeshStandardMaterial({ color: C.white, roughness: 0.5 }), flood);
   const belts: THREE.BufferGeometry[] = [boxAt(BODY_R * 2 + 8, 28, BODY_R * 2 + 8, 0, LEG_TOP + 4, 0)];
   const decks: THREE.BufferGeometry[] = [];
@@ -329,17 +346,18 @@ export function buildTokyoTower(scene: THREE.Scene): TokyoTowerStats {
   const meshes: THREE.Object3D[] = [];
   const add = (...o: THREE.Object3D[]) => { meshes.push(...o); scene.add(...o); };
   const rnd = prng(3330);
-  const flood = { value: 0 }, redFlood = { value: 0 };
-  NIGHT_GLOW.push({ set: (k) => { flood.value = 0.06 + 0.42 * k; redFlood.value = 0.25 * flood.value; } });
-  buildTower(flood, add);
+  const flood = { value: 0 }, redFlood = { value: 0 }, redLift = { value: 0 };
+  // redLift: the tower's red steel, 0.2 by day (the shaded side keeps its colour), the same 0.48 as the floodlight at night.
+  NIGHT_GLOW.push({ set: (k) => { flood.value = 0.06 + 0.42 * k; redFlood.value = 0.25 * flood.value; redLift.value = 0.2 + 0.28 * k; } });
+  buildTower(flood, redLift, add);
 
   // ------------------------------------------------------------ ground: plaza and axis paving, lawns, lane
   const paved: THREE.BufferGeometry[] = [], soft: THREE.BufferGeometry[] = [], plain: THREE.BufferGeometry[] = [];
   const pave = (r: TtwRect, y: number, col: number) => paved.push(worldUv(tint(rectFlat(r, y), col), 220));
   const lawn = (r: TtwRect, y: number, col: number) => soft.push(tint(rectFlat(r, y), col));
   const line = (r: TtwRect, y: number, col: number) => plain.push(tint(rectFlat(r, y), col));
-  // SKY PLAZA: pale stone slabs, a darker band round its edge.
-  pave(SKY_PLAZA, 0.6, C.plaza);
+  // SKY PLAZA: pale stone slabs (its own mesh: a faint warm lift at night, see below), a darker band round its edge.
+  const plazaPaved = [worldUv(tint(rectFlat(SKY_PLAZA, 0.6), C.plaza), 220)];
   for (const [x0, x1] of [[SKY_PLAZA.x0, SKY_PLAZA.x0 + 12], [SKY_PLAZA.x1 - 12, SKY_PLAZA.x1]]) line({ x0, x1, z0: SKY_PLAZA.z0, z1: SKY_PLAZA.z1 }, 0.7, C.wallDark);
   // RED AXIS: dark granite, light stone edges and one thin deep red inlay on the centre line (paint, not light).
   pave({ x0: AXIS.x0, x1: AXIS.x1, z0: AXIS.z0, z1: AXIS.z1 }, 0.66, C.axis);
@@ -364,11 +382,39 @@ export function buildTokyoTower(scene: THREE.Scene): TokyoTowerStats {
   pave({ x0: AXIS.x1, x1: 960, z0: 2995, z1: 3020 }, 0.58, C.gravel);
   const pavingMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: slabTexture(2402, 60), vertexColors: true, roughness: 0.92, ...ABOVE_GROUND });
   const softMat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 1, ...ABOVE_GROUND });
-  for (const [list, m] of [[paved, pavingMat], [soft, softMat], [plain, softMat]] as const) {
+  // SKY PLAZA at night: the slabs give back a little warm light (the lamps and the floodlit tower
+  // bouncing off pale stone), so a runner reads as a dark shape against the floor. No light of its own by day.
+  const plazaTex = pavingMat.map!;
+  const plazaMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: plazaTex, vertexColors: true, roughness: 0.92, emissive: 0xb8ac96, emissiveMap: plazaTex, emissiveIntensity: 0, ...ABOVE_GROUND });
+  glowAtNight(plazaMat, 0, 0.1);
+  for (const [list, m] of [[paved, pavingMat], [plazaPaved, plazaMat], [soft, softMat], [plain, softMat]] as const) {
     const mesh = new THREE.Mesh(mergeGeometries(list)!, m);
     mesh.receiveShadow = true;
     add(mesh);
   }
+  // Low indirect light on SKY PLAZA's edges: a dim warm line where the floor meets the terrace walls
+  // and along the axis kerbs, and a soft pad at the foot of every stair (where the ways up start).
+  // Paint-pale by day, a little brighter at night; far below the lamps (nothing here can white out).
+  const dim: THREE.BufferGeometry[] = [];
+  const dl = (r: TtwRect, y: number, col: number = WARM_GREY) => dim.push(tint(rectFlat(r, y), col));
+  dl({ x0: SKY_PLAZA.x0 + 1, x1: SKY_PLAZA.x0 + 4, z0: SKY_PLAZA.z0, z1: 2700 }, 0.8);
+  dl({ x0: SKY_PLAZA.x1 - 4, x1: SKY_PLAZA.x1 - 1, z0: SKY_PLAZA.z0, z1: 2700 }, 0.8);
+  for (const x of [AXIS.x0 + 9, AXIS.x1 - 9]) dl({ x0: x - 1.2, x1: x + 1.2, z0: RED_TERRACE.z1, z1: GATE.z0 }, 0.8);
+  for (const st of STAIRS) {
+    const foot = st.axis === 'x' ? (st.dir === 1 ? st.x0 : st.x1) : (st.dir === 1 ? st.z0 : st.z1);
+    if (st.low > 0) continue;
+    const out = st.dir === 1 ? -1 : 1; // the ground in front of the first step
+    if (st.axis === 'x') {
+      dl({ x0: Math.min(foot, foot + out * 3), x1: Math.max(foot, foot + out * 3), z0: st.z0 + 6, z1: st.z1 - 6 }, 0.82);
+      dl({ x0: Math.min(foot + out * 3, foot + out * 40), x1: Math.max(foot + out * 3, foot + out * 40), z0: st.z0 + 10, z1: st.z1 - 10 }, 0.78, C.padGlow);
+    } else {
+      dl({ x0: st.x0 + 6, x1: st.x1 - 6, z0: Math.min(foot, foot + out * 3), z1: Math.max(foot, foot + out * 3) }, 0.82);
+      dl({ x0: st.x0 + 10, x1: st.x1 - 10, z0: Math.min(foot + out * 3, foot + out * 40), z1: Math.max(foot + out * 3, foot + out * 40) }, 0.78, C.padGlow);
+    }
+  }
+  const dimMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, ...ABOVE_GROUND });
+  NIGHT_GLOW.push({ set: (k) => { dimMat.color.setScalar(0.42 + 0.2 * k); } });
+  add(new THREE.Mesh(mergeGeometries(dim)!, dimMat));
 
   // ------------------------------------------------------------ terraces: retaining walls, coping, the tunnel bridge, stairs, the slope
   const walls: THREE.BufferGeometry[] = [], trim: THREE.BufferGeometry[] = [], steps: THREE.BufferGeometry[] = [];
@@ -458,17 +504,46 @@ export function buildTokyoTower(scene: THREE.Scene): TokyoTowerStats {
     wall(boxAt(FOOTING, FOOTING_H - 6, FOOTING, x, (FOOTING_H - 6) / 2, z), C.wallDark);
     tr(boxAt(FOOTING + 4, 6, FOOTING + 4, x, FOOTING_H - 3, z), C.coping);
   }
-  // Rails: steel mesh panels (see-through), a top bar and posts.
+  // Rails. Where the ring looks onto the plaza and the axis: a steel railing of thin uprights
+  // (see-through, it is how the ring watches the plaza). Low stair sides and the ring's back edges
+  // (the lawns, the north court, the lane): a low stone parapet instead, with the same footprint and
+  // height (the collision and the sight lines are the rail prims', unchanged).
   const meshPanels: THREE.BufferGeometry[] = [];
   const posts: THREE.Matrix4[] = [];
+  const parapet = (b: BoxPrim, alongX: boolean) =>
+    b.y0 < 90 || // a low stair side
+    (!alongX && (b.x < 50 || (b.x > 925 && b.x < 940))) || // the ring's west face, the east face over the lane
+    (alongX && b.z < 2000); // the north faces (the north court)
   for (const p of WORLD) {
     if (p.group !== 'ttwRail' || p.kind !== 'box') continue;
     const b = p as BoxPrim, alongX = b.w > b.d, len = alongX ? b.w : b.d, h = b.y1 - b.y0;
+    if (parapet(b, alongX)) {
+      // On a stair the parapet's top follows the flight (a sloped stone wall down to the ground, not
+      // steps of blocks); on a terrace edge it is a level wall on the coping.
+      const st = STAIRS.find((q) => b.x > q.x0 - 5 && b.x < q.x1 + 5 && b.z > q.z0 - 5 && b.z < q.z1 + 5 && b.y0 < q.high);
+      const top = (x: number, z: number) => {
+        if (!st) return b.y1;
+        const u = Math.min(1, Math.max(0, st.axis === 'x' ? (x - st.x0) / (st.x1 - st.x0) : (z - st.z0) / (st.z1 - st.z0)));
+        return st.low + (st.high - st.low) * (st.dir === 1 ? u : 1 - u) + 34; // the rail height above the steps
+      };
+      const shape = (g: THREE.BufferGeometry, y0: number, dy: number) => {
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const t = top(pos.getX(i), pos.getZ(i));
+          pos.setY(i, pos.getY(i) > 0 ? t + dy : Math.max(0, y0 >= 0 ? y0 : t + y0));
+        }
+        g.computeVertexNormals();
+        return g;
+      };
+      wall(shape(boxAt(alongX ? len : 8, 1, alongX ? 8 : len, b.x, 0, b.z), st ? 0 : b.y0, -4), C.stone);
+      tr(shape(boxAt(alongX ? len + 0.2 : 11, 1, alongX ? 11 : len + 0.2, b.x, 0, b.z), -4, 0), C.parapetCap);
+      continue;
+    }
     const panel = new THREE.PlaneGeometry(len, h - 6).translate(0, 0, 0);
     if (!alongX) panel.rotateY(Math.PI / 2);
     panel.translate(b.x, b.y0 + (h - 6) / 2 + 2, b.z);
     const uv = panel.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * len / 24, uv.getY(i) * (h - 6) / 24);
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * len / 24, uv.getY(i));
     meshPanels.push(panel.toNonIndexed());
     st(boxAt(alongX ? len : 3, 3, alongX ? 3 : len, b.x, b.y1 - 1.5, b.z));
     const n = Math.max(1, Math.round(len / 60));
@@ -477,8 +552,7 @@ export function buildTokyoTower(scene: THREE.Scene): TokyoTowerStats {
       posts.push(M4(alongX ? b.x + t : b.x, b.y0, alongX ? b.z : b.z + t, 0, 1, h / 30, 1));
     }
   }
-  const meshTex = latticeTexture();
-  const meshMat = new THREE.MeshStandardMaterial({ color: 0x2c2e31, map: meshTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.3 });
+  const meshMat = new THREE.MeshStandardMaterial({ color: 0x4a4d50, map: railTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.55, metalness: 0.35 });
   add(new THREE.Mesh(mergeGeometries(meshPanels)!, meshMat));
   add(instanced(new THREE.BoxGeometry(3, 30, 3).translate(0, 15, 0), new THREE.MeshStandardMaterial({ color: C.steel, roughness: 0.6, metalness: 0.4 }), posts, false));
 
