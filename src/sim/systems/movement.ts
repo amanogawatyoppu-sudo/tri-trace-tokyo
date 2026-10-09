@@ -3,7 +3,7 @@ import type { Entity } from '../entity';
 import type { GameState } from '../state';
 import { emit, speedMul } from '../state';
 import { SAME_LEVEL } from './collision';
-import { blocked, inWater, moveBody, settle, supportHeight } from './world';
+import { canStep, inWater, moveBody, settle, supportHeight } from './world';
 import { dryNodeNear } from '../../ai/nav';
 
 /**
@@ -161,8 +161,8 @@ export function separate(state: GameState): void {
       if (d < 1e-3) { dx = ((a.id * 7 + b.id * 13) % 10) / 10 - 0.45; dz = 0.5; d = Math.hypot(dx, dz); }
       const push = (minD - d) / 2;
       const ux = dx / d, uz = dz / d;
-      if (!blocked(a.x - ux * push, a.z - uz * push, a.y)) { a.x -= ux * push; a.z -= uz * push; }
-      if (!blocked(b.x + ux * push, b.z + uz * push, b.y)) { b.x += ux * push; b.z += uz * push; }
+      if (canStep(a, a.x - ux * push, a.z - uz * push)) { a.x -= ux * push; a.z -= uz * push; }
+      if (canStep(b, b.x + ux * push, b.z + uz * push)) { b.x += ux * push; b.z += uz * push; }
     }
   }
 }

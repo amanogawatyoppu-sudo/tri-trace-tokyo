@@ -1,5 +1,5 @@
 import type { Prim, RampPrim } from '../../config/map';
-import { BOUNDS, WALK_EDGE, WORLD, insideLoop } from '../../config/map';
+import { BOUNDS, WALK_EDGE, WORLD, insideLoop, loopSignedDist } from '../../config/map';
 import { CR } from '../../config/constants';
 
 /** Highest ledge a character can walk up without stairs. */
@@ -136,12 +136,23 @@ export function supportHeight(x: number, z: number, y: number): number {
 /** Whether a character at (x, y, z) would intersect a wall, parapet, cliff or water. */
 export function blocked(x: number, z: number, y: number, r = CR): boolean {
   if (!insideLoop(x, z, WALK_EDGE + r)) return true; // the fence along the Yamanote tracks is the edge of the world
-  for (const p of near(x - r, z - r, x + r, z + r, scratch)) {
-    if (Math.abs(x - p.x) >= p.w / 2 + r || Math.abs(z - p.z) >= p.d / 2 + r) continue;
-    if (p.y0 >= y + BODY_H) continue; // overhead: walk underneath
-    if (topOverCircle(p, x, z, r) > y + STEP_UP) return true;
-  }
+  for (const p of near(x - r, z - r, x + r, z + r, scratch)) if (blocks(p, x, z, y, r)) return true;
   return false;
+}
+
+/**
+ * Whether one primitive stops a character at (x, y, z): the body is the square of
+ * half-size r around it (the shape every collision test here uses, push-out included).
+ */
+function blocks(p: Prim, x: number, z: number, y: number, r: number): boolean {
+  if (Math.abs(x - p.x) >= p.w / 2 + r || Math.abs(z - p.z) >= p.d / 2 + r) return false;
+  if (p.y0 >= y + BODY_H) return false; // overhead: walk underneath
+  return topOverCircle(p, x, z, r) > y + STEP_UP;
+}
+
+/** How far a body overlaps a primitive's collision square (the shorter way out). */
+function depth(p: Prim, x: number, z: number, r: number): number {
+  return Math.min(p.w / 2 + r - Math.abs(x - p.x), p.d / 2 + r - Math.abs(z - p.z));
 }
 
 /** Down in the water (river, moat, pond): below its surface inside its outline. */
@@ -213,51 +224,211 @@ export interface Body {
   z: number;
 }
 
+/** Farthest a wedged body is moved to free it (one body width: never a jump across the map). */
+const PUSH_MAX = 2 * CR;
+const RING_STEPS = 16;
+const freeScratch: Prim[] = [];
+const wallScratch: Prim[] = [];
+const freeSpot = { x: 0, z: 0 };
+
 /**
  * Moves a body toward (nx, nz): X then Z separately so it slides along walls
  * (the v6 feel), stepping up stairs/slopes. Vertical settling is separate.
+ * With `assist` (characters; not route checks) a wedged body may move along the
+ * gap it is in and a body clipping a corner is guided round it.
  */
-export function moveBody(b: Body, nx: number, nz: number): void {
-  if (!blocked(nx, b.z, b.y)) b.x = nx;
-  if (!blocked(b.x, nz, b.y)) b.z = nz;
+export function moveBody(b: Body, nx: number, nz: number, assist = true): void {
+  const x0 = b.x, z0 = b.z;
+  if (fits(b, nx, b.z, assist)) b.x = nx;
+  if (fits(b, b.x, nz, assist)) b.z = nz;
+  // Almost stopped dead (the slide along the wall is next to nothing): round the corner if that is all it is.
+  if (assist && Math.hypot(b.x - x0, b.z - z0) < 0.25 * Math.hypot(nx - x0, nz - z0)) {
+    if (Math.abs(nx - x0) >= Math.abs(nz - z0)) roundCorner(b, nx - b.x, 'x');
+    else roundCorner(b, nz - b.z, 'z');
+  }
+  if ((b.x === x0 && b.z === z0) || !dropsIntoGap(b.y, b.x, b.z)) return;
+  // The step would drop it into a gap: keep whichever half of it does not.
+  const x1 = b.x, z1 = b.z;
+  b.x = x0; b.z = z0;
+  if (x1 !== x0 && fits(b, x1, z0, assist) && !dropsIntoGap(b.y, x1, z0)) b.x = x1;
+  else if (z1 !== z0 && fits(b, x0, z1, assist) && !dropsIntoGap(b.y, x0, z1)) b.z = z1;
 }
 
-/** The blocking primitive a body at (x, y, z) overlaps, if any (same rule as `blocked`). */
-function blockingPrim(x: number, z: number, y: number, r: number): Prim | null {
-  for (const p of near(x - r, z - r, x + r, z + r, scratch)) {
-    if (Math.abs(x - p.x) >= p.w / 2 + r || Math.abs(z - p.z) >= p.d / 2 + r) continue;
-    if (p.y0 >= y + BODY_H) continue;
-    if (topOverCircle(p, x, z, r) > y + STEP_UP) return p;
+/** How far round a corner a body is guided when it walks into one nearly square on. */
+const CORNER = CR * 0.75;
+
+/**
+ * A step along one axis was stopped by the very edge of something (the body only
+ * clips a corner) and the body barely moved: slide sideways toward the near end of
+ * it, by no more than the step, so the body rounds the corner instead of sticking to
+ * it. The sideways move is an ordinary checked move.
+ */
+function roundCorner(b: Body, step: number, axis: 'x' | 'z'): void {
+  if (Math.abs(step) < 1e-6) return;
+  const tx = axis === 'x' ? b.x + step : b.x, tz = axis === 'z' ? b.z + step : b.z;
+  if (!insideLoop(tx, tz, WALK_EDGE + CR)) return;
+  // The smallest sideways shift that clears everything in the way of the step.
+  let best = Infinity;
+  const prims = [...near(tx - CR, tz - CR, tx + CR, tz + CR, freeScratch)];
+  for (const p of prims) {
+    if (!blocks(p, tx, tz, b.y, CR)) continue;
+    const c = axis === 'x' ? b.z : b.x, pc = axis === 'x' ? p.z : p.x, half = (axis === 'x' ? p.d : p.w) / 2 + CR + 0.05;
+    for (const side of [pc - half - c, pc + half - c]) {
+      if (Math.abs(side) > CORNER || Math.abs(side) >= Math.abs(best)) continue;
+      const sx = axis === 'x' ? tx : b.x + side, sz = axis === 'x' ? b.z + side : tz;
+      if (!blocked(sx, sz, b.y)) best = side;
+    }
+  }
+  if (best === Infinity) return;
+  const slide = Math.sign(best) * Math.min(Math.abs(best), Math.abs(step));
+  const sx = axis === 'x' ? b.x : b.x + slide, sz = axis === 'x' ? b.z + slide : b.z;
+  if (!blocked(sx, sz, b.y) && !dropsIntoGap(b.y, sx, sz)) { b.x = sx; b.z = sz; }
+}
+
+/**
+ * Whether a body may move to (x, z) at its height: the spot is free and does not
+ * drop it into a gap narrower than itself; or the body is already wedged and the
+ * move takes it no deeper into anything (so it can walk out along a crevice).
+ */
+export function canStep(b: Body, x: number, z: number): boolean {
+  return fits(b, x, z, true) && !dropsIntoGap(b.y, x, z);
+}
+
+function fits(b: Body, x: number, z: number, escape: boolean): boolean {
+  if (!blocked(x, z, b.y)) return true;
+  return escape && blocked(b.x, b.z, b.y) && noDeeper(b, x, z);
+}
+
+/** A wedged body's move to (x, z) overlaps nothing it was not already in, and nothing more deeply. */
+function noDeeper(b: Body, x: number, z: number): boolean {
+  if (!insideLoop(x, z, WALK_EDGE + CR) && loopSignedDist(x, z) < loopSignedDist(b.x, b.z)) return false;
+  const near_ = near(x - CR, z - CR, x + CR, z + CR, freeScratch);
+  for (let k = 0; k < near_.length; k++) {
+    const p = near_[k];
+    if (!blocks(p, x, z, b.y, CR)) continue;
+    if (!blocks(p, b.x, b.z, b.y, CR) || depth(p, x, z, CR) > depth(p, b.x, b.z, CR) + 1e-9) return false;
+  }
+  return true;
+}
+
+/**
+ * Stepping off a ledge (feet at y) to (x, z) lands where the body would not fit and has no room
+ * to be pushed free (off the side of a footbridge into a slot beside a building).
+ */
+function dropsIntoGap(y: number, x: number, z: number): boolean {
+  const land = supportHeight(x, z, y);
+  if (land >= y - 0.5 || !blocked(x, z, land)) return false;
+  return !findFreeSpot(x, z, land, CR);
+}
+
+/** A wall (its footprint, not the body margin around it) at (x, z) for feet at y. */
+function wallIn(prims: readonly Prim[], x: number, z: number, y: number): Prim | null {
+  for (let k = 0; k < prims.length; k++) {
+    const p = prims[k];
+    if (!inside(p, x, z) || p.y0 >= y + BODY_H) continue;
+    if (topAt(p, x, z) > y + STEP_UP) return p;
   }
   return null;
 }
 
+/** Whether going straight from (ax, az) to (bx, bz) at height y enters a wall it did not start in. */
+function crossesWall(ax: number, az: number, bx: number, bz: number, y: number): boolean {
+  const prims = near(Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz), wallScratch);
+  const start = wallIn(prims, ax, az, y);
+  const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az)));
+  for (let k = 1; k <= n; k++) {
+    const w = wallIn(prims, ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n, y);
+    if (w && w !== start) return true;
+  }
+  return false;
+}
+
 /**
- * If a body ended up overlapping a wall (dropped off the side of stairs,
- * shoved by separation, teleported), push it out to the nearest free side.
- * Without this every move from inside counts as blocked and the body freezes.
+ * The nearest spot a wedged body at (x, y, z) fits, reached without passing through a
+ * wall: straight out of each primitive it overlaps along an axis (the way the
+ * collision square leaves it), or a ring of nearby points; at most PUSH_MAX away.
+ * Result in `freeSpot`; false if there is none (the body stays put and walks out).
  */
-export function pushOut(b: Body, r = CR): void {
-  for (let iter = 0; iter < 4; iter++) {
-    const p = blockingPrim(b.x, b.z, b.y, r);
-    if (!p) return;
-    const hw = p.w / 2, hd = p.d / 2;
-    const cx = Math.max(p.x - hw, Math.min(p.x + hw, b.x)), cz = Math.max(p.z - hd, Math.min(p.z + hd, b.z));
-    let dx = b.x - cx, dz = b.z - cz;
-    const d = Math.hypot(dx, dz);
-    if (d > 1e-6) {
-      // Centre outside the footprint: move straight away from the closest point.
-      dx /= d; dz /= d;
-      b.x = cx + dx * (r + 0.05);
-      b.z = cz + dz * (r + 0.05);
-    } else {
-      // Centre inside: leave through the nearest edge.
-      const ex = [p.x - hw - r - 0.05 - b.x, p.x + hw + r + 0.05 - b.x], ez = [p.z - hd - r - 0.05 - b.z, p.z + hd + r + 0.05 - b.z];
-      const opts = [[ex[0], 0], [ex[1], 0], [0, ez[0]], [0, ez[1]]].sort((u, v) => Math.hypot(u[0], u[1]) - Math.hypot(v[0], v[1]));
-      b.x += opts[0][0];
-      b.z += opts[0][1];
+function findFreeSpot(x: number, z: number, y: number, r: number): boolean {
+  const cand: number[] = []; // x, z, distance
+  const add = (cx: number, cz: number) => {
+    const d = Math.hypot(cx - x, cz - z);
+    if (d <= PUSH_MAX) cand.push(cx, cz, d);
+  };
+  const prims = [...near(x - r, z - r, x + r, z + r, freeScratch)];
+  for (const p of prims) {
+    if (!blocks(p, x, z, y, r)) continue;
+    add(p.x - p.w / 2 - r - 0.05, z);
+    add(p.x + p.w / 2 + r + 0.05, z);
+    add(x, p.z - p.d / 2 - r - 0.05);
+    add(x, p.z + p.d / 2 + r + 0.05);
+  }
+  for (let d = 2; d <= PUSH_MAX; d += 2) {
+    for (let k = 0; k < RING_STEPS; k++) {
+      const a = (k / RING_STEPS) * Math.PI * 2;
+      add(x + Math.sin(a) * d, z + Math.cos(a) * d);
     }
   }
+  const order = Array.from({ length: cand.length / 3 }, (_, i) => i).sort((i, j) => cand[i * 3 + 2] - cand[j * 3 + 2] || i - j);
+  for (const i of order) {
+    const cx = cand[i * 3], cz = cand[i * 3 + 1];
+    if (blocked(cx, cz, y, r) || crossesWall(x, z, cx, cz, y)) continue;
+    freeSpot.x = cx; freeSpot.z = cz;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * If a body ended up overlapping a wall (dropped off the side of stairs, shoved by
+ * separation, teleported), move it to the nearest spot it fits, tested with the same
+ * shape as every move. With no such spot close by it stays (not thrown across a
+ * wall or far away) and walks out: `canStep` lets a wedged body move along the gap.
+ * Once free it is never moved again, so it cannot shake between two walls.
+ */
+export function pushOut(b: Body, r = CR): void {
+  if (!blocked(b.x, b.z, b.y, r)) return;
+  if (!directPush(b.x, b.z, b.y, r) && !findFreeSpot(b.x, b.z, b.y, r)) return;
+  b.x = freeSpot.x;
+  b.z = freeSpot.z;
+}
+
+/** The blocking primitive a body at (x, y, z) overlaps, if any. */
+function blockingPrim(x: number, z: number, y: number, r: number): Prim | null {
+  for (const p of near(x - r, z - r, x + r, z + r, scratch)) if (blocks(p, x, z, y, r)) return p;
+  return null;
+}
+
+/**
+ * The usual way out, kept so ordinary bumps resolve as they always have: straight
+ * away from the closest point of what the body overlaps (through the nearest edge if
+ * its centre is inside), a few times over. Used only when it ends somewhere the body
+ * fits without crossing a wall; at a corner or in a narrow gap it does not, and the
+ * nearest free spot is searched for instead.
+ */
+function directPush(x0: number, z0: number, y: number, r: number): boolean {
+  let x = x0, z = z0;
+  for (let iter = 0; iter < 4; iter++) {
+    const p = blockingPrim(x, z, y, r);
+    if (!p) break;
+    const hw = p.w / 2, hd = p.d / 2;
+    const cx = Math.max(p.x - hw, Math.min(p.x + hw, x)), cz = Math.max(p.z - hd, Math.min(p.z + hd, z));
+    let dx = x - cx, dz = z - cz;
+    const d = Math.hypot(dx, dz);
+    if (d > 1e-6) {
+      dx /= d; dz /= d;
+      x = cx + dx * (r + 0.05);
+      z = cz + dz * (r + 0.05);
+    } else {
+      const ex = [p.x - hw - r - 0.05 - x, p.x + hw + r + 0.05 - x], ez = [p.z - hd - r - 0.05 - z, p.z + hd + r + 0.05 - z];
+      const opts = [[ex[0], 0], [ex[1], 0], [0, ez[0]], [0, ez[1]]].sort((u, v) => Math.hypot(u[0], u[1]) - Math.hypot(v[0], v[1]));
+      x += opts[0][0];
+      z += opts[0][1];
+    }
+  }
+  if (blocked(x, z, y, r) || crossesWall(x0, z0, x, z, y)) return false;
+  freeSpot.x = x; freeSpot.z = z;
+  return true;
 }
 
 /**
@@ -265,7 +436,14 @@ export function pushOut(b: Body, r = CR): void {
  * toward a lower one. Pass dt = Infinity to land instantly.
  */
 export function settle(b: Body, dt: number): void {
-  pushOut(b);
+  const land = supportHeight(b.x, b.z, b.y);
+  if (land < b.y && dt !== Infinity) {
+    // Falling: free it once for the floor it will land on, not again at every height on the way down.
+    const y = b.y;
+    b.y = land;
+    pushOut(b);
+    b.y = y;
+  } else pushOut(b);
   const s = supportHeight(b.x, b.z, b.y);
   if (s >= b.y) b.y = s;
   else b.y = Math.max(s, b.y - FALL_SPEED * dt);
@@ -278,7 +456,8 @@ export function groundAt(x: number, z: number, fromY = 0): number {
 
 /**
  * Simulates walking in a straight line (used for nav edges and shortcuts).
- * Returns where the walker ended up.
+ * Returns where the walker ended up. A route counts only where walking straight works
+ * on its own, so the walker gets no help (no wedged escape, no guiding round corners).
  */
 export function walkLine(from: Body, tx: number, tz: number, step = 8): Body {
   const b = { ...from };
@@ -286,7 +465,7 @@ export function walkLine(from: Body, tx: number, tz: number, step = 8): Body {
   const n = Math.max(1, Math.ceil(len / step));
   const sx = (tx - from.x) / n, sz = (tz - from.z) / n;
   for (let i = 0; i < n; i++) {
-    moveBody(b, b.x + sx, b.z + sz);
+    moveBody(b, b.x + sx, b.z + sz, false);
     settle(b, Infinity);
   }
   return b;
