@@ -13,7 +13,7 @@ import { inLight } from '../src/sim/night';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
 import { inIkebukuro } from '../src/config/ikebukuro';
-import { inShinagawa } from './helpers';
+import { inBunkyo, inShinagawa } from './helpers';
 
 /**
  * MAP REFORGE (parallel A): 上野 GREEN HEIGHTS (layout in config/ueno.ts). Everything outside the
@@ -23,8 +23,9 @@ import { inShinagawa } from './helpers';
  * taken on bbe30ec with all three areas left out.
  */
 const UENO = 4;
+// 文京 (tests/bunkyoReforge.test.ts) is left out as well since map-reforge-bunkyo; re-taken on 897dc77 with it left out.
 const BEFORE = {
-  world: 'dcacc84f', n: 794, lights: '630bd93e', buildings: '40c9a6af', poles: '9cd049e0', wires: 'f03feef7', streets: 'abf581dd', places: 'b6abbd6c',
+  world: '7d339c70', n: 767, lights: '4f4f6f9f', buildings: 'ea8eb01c', poles: '2ef56886', wires: '52cd249d', streets: '77583c1e', places: 'b6abbd6c',
 };
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);
@@ -32,8 +33,8 @@ const hash = (v: unknown) => {
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
   return h.toString(16);
 };
-/** The other parallel reforges (池袋, 品川). */
-const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p);
+/** The other parallel reforges (池袋, 品川, 文京). */
+const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p) || inBunkyo(p);
 const out = (p: { x: number; z: number }) => !inUenoZone(p.x, p.z) && !others(p);
 const mine = (p: Prim) => inUenoZone(p.x, p.z);
 /** Solids someone on the ground walks into (not floors, not water, not the hill's own terrain). */

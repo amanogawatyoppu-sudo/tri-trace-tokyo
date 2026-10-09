@@ -21,6 +21,7 @@ import { IKB_BUILDINGS, IKB_DECKS, IKB_LAMPS, IKB_PLANT, IKB_STAIRS, IKB_ZONES, 
 import type { IkbBuilding } from './ikebukuro';
 import * as SHG from './shinagawa';
 import type { ShinagawaBuilding } from './shinagawa';
+import * as BK from './bunkyo';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -1664,6 +1665,128 @@ export const SHINAGAWA_BUILT: { buildings: (ShinagawaBuilding & { h: number })[]
   }
   for (const [x, z] of SHG.SHINAGAWA_TREES) tree(x, z, 260);
   for (const l of SHG.SHINAGAWA_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
+}
+
+// ---------------------------------------------------------------- 文京 QUIET SLOPES (MAP REFORGE parallel D)
+/**
+ * The residential ground north of the river between 春日通り and the river lane is rebuilt by hand
+ * (config/bunkyo.ts) after the generated city, the same way as the other reforged districts: the
+ * generated pieces in the area are taken out and QUIET SLOPES put in — the ridge (台地) with the
+ * RIDGE ROAD on its cliff edge, the slopes that cross it (SLOPE GATE, KAMI-ZAKA, NAKA-ZAKA, the
+ * TWIN SLOPES, STONE BEND, the terrace stair), the WALL PATH and the LOW ROAD at its feet, the
+ * houses with their garden walls and hedges. Its houses are not added to BUILDINGS (the generic
+ * city renderer leaves them alone): render/bunkyo.ts draws everything in the 'bunkyo…' groups.
+ */
+export const BUNKYO_BUILT: { houses: (BK.BkHouse & { h: number })[] } = { houses: [] };
+{
+  const inZone = (x: number, z: number) => BK.inBunkyoZone(x, z);
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree', 'sidewalk']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (inZone(p.x, p.z) && GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car')) prims.splice(i, 1);
+  }
+  const keep = <T,>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  const out = (p: Point) => !inZone(p.x, p.z);
+  keep(BUILDINGS, (b) => b.outside || out(b));
+  keep(PARKINGS, out);
+  keep(LIGHTS, out);
+  keep(SIGNALS, out);
+  keep(STREET_SEGS, out);
+  keep(INTERSECTIONS, out);
+  keep(CROSSWALKS, out);
+  keep(BLOCKS, (b) => out({ x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2 }));
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (out(p)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+  const put = (r: BK.Rect, y0: number, y1: number, mat: Material, group: string, extra: Partial<BoxPrim> = {}) =>
+    box((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2, r.x1 - r.x0, r.z1 - r.z0, y1, mat, { y0, group, ...extra });
+
+  // The lanes at street level (the city draws them as narrow lanes; the minimap shows them).
+  const lane = (r: BK.Rect, axis: 'x' | 'z') => STREET_SEGS.push({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, w: r.x1 - r.x0, d: r.z1 - r.z0, axis, kind: 'alley' });
+  lane(BK.LOW_ROAD, 'z');
+  for (const r of BK.WALL_PATH) lane(r, r.id === 'jog' ? 'x' : 'z');
+  lane(BK.SIDE_LANE, 'x');
+  lane(BK.RIVER_LANE, 'x');
+  lane(BK.EAST_LANE, 'x');
+  lane(BK.COURT_LANE, 'x');
+
+  // The ridge: solid ground pieces with stone sides (the slopes are cut between them), the FORK and STONE BEND's corner.
+  for (const r of BK.PLATEAU) put(r, 0, BK.RIDGE_H, 'earth', 'bunkyoGround');
+  put(BK.FORK, 0, BK.RIDGE_H, 'stone', 'bunkyoGround');
+  put(BK.BEND_CORNER, 0, BK.BEND_H, 'stone', 'bunkyoGround');
+  for (const s of BK.SLOPES) {
+    prims.push({
+      kind: 'ramp', x: (s.x0 + s.x1) / 2, z: (s.z0 + s.z1) / 2, w: s.x1 - s.x0, d: s.z1 - s.z0, y0: 0,
+      axis: s.axis, dir: s.dir, hLow: s.low, hHigh: s.high, style: s.style, mat: 'stone', group: 'bunkyoSlope',
+    });
+  }
+
+  // Guard fences: see-through iron on a low kerb, along the open edges of the ridge and beside the slopes
+  // wherever a slope stands more than a step above the ground beside it.
+  const FENCE = 6, FENCE_H = 32;
+  const fence = { group: 'bunkyoFence', noFloor: true, seeThrough: true } as const;
+  for (const f of BK.RIDGE_FENCES) put(f, f.y, f.y + FENCE_H, 'metal', fence.group, fence);
+  const onRect = (r: BK.Rect, x: number, z: number) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
+  /** Highest walkable ground of the district at (x, z) (ridge, landings, slopes), 0 elsewhere. */
+  const groundAt = (x: number, z: number): number => {
+    let h = 0;
+    for (const r of BK.PLATEAU) if (onRect(r, x, z)) h = Math.max(h, BK.RIDGE_H);
+    if (onRect(BK.FORK, x, z)) h = Math.max(h, BK.RIDGE_H);
+    if (onRect(BK.BEND_CORNER, x, z)) h = Math.max(h, BK.BEND_H);
+    for (const s of BK.SLOPES) if (onRect(s, x, z)) h = Math.max(h, slopeAt(s, x, z));
+    return h;
+  };
+  const slopeAt = (s: BK.BkSlope, x: number, z: number) => {
+    const a0 = s.axis === 'x' ? s.x0 : s.z0, a1 = s.axis === 'x' ? s.x1 : s.z1, u = ((s.axis === 'x' ? x : z) - a0) / (a1 - a0);
+    const t = Math.min(1, Math.max(0, s.dir === 1 ? u : 1 - u));
+    return s.low + (s.high - s.low) * t;
+  };
+  for (const s of BK.SLOPES) {
+    const along = s.axis === 'x' ? [s.x0, s.x1] : [s.z0, s.z1];
+    for (const side of s.rails) {
+      const edge = side === 'n' ? s.z0 : side === 's' ? s.z1 : side === 'w' ? s.x0 : s.x1, n = side === 'n' || side === 'w' ? -1 : 1;
+      for (let u = along[0]; u < along[1] - 1; u += 20) {
+        const u1 = Math.min(u + 20, along[1]), um = (u + u1) / 2;
+        const px = s.axis === 'x' ? um : edge, pz = s.axis === 'x' ? edge : um;
+        const h = slopeAt(s, px, pz), lo = Math.min(slopeAt(s, s.axis === 'x' ? u : px, s.axis === 'x' ? pz : u), slopeAt(s, s.axis === 'x' ? u1 : px, s.axis === 'x' ? pz : u1));
+        const hi = Math.max(h, lo, slopeAt(s, s.axis === 'x' ? u : px, s.axis === 'x' ? pz : u), slopeAt(s, s.axis === 'x' ? u1 : px, s.axis === 'x' ? pz : u1));
+        // Only where it stands above what is beside it (the ground, a lower lane), not against the ridge.
+        const ox = s.axis === 'x' ? um : edge + n * 4, oz = s.axis === 'x' ? edge + n * 4 : um;
+        if (hi < 20 || groundAt(ox, oz) >= lo - 12) continue;
+        const fx = s.axis === 'x' ? um : edge - n * (FENCE / 2), fz = s.axis === 'x' ? edge - n * (FENCE / 2) : um;
+        // (Part of the slope: same group, so the map's overlap check reads it as one structure.)
+        box(fx, fz, s.axis === 'x' ? u1 - u : FENCE, s.axis === 'x' ? FENCE : u1 - u, hi + FENCE_H, 'metal', { y0: Math.max(0, lo - 10), ...fence, group: 'bunkyoSlope' });
+      }
+    }
+  }
+
+  // Houses (one solid each, standing on the ridge or the street) and the garden walls and hedges.
+  for (const hs of BK.HOUSES) {
+    const h = floorsToHeight(hs.floors);
+    put(hs, hs.base, hs.base + h, 'bldg', 'bunkyo', { noFloor: true });
+    BUNKYO_BUILT.houses.push({ ...hs, h });
+  }
+  const WALL_MAT: Record<BK.WallKind, Material> = { plaster: 'plaster', stone: 'stone', block: 'concrete', hedge: 'hedge' };
+  for (const wl of BK.WALLS) put(wl, wl.base, wl.base + wl.h, WALL_MAT[wl.kind], wl.kind === 'hedge' ? 'bunkyoHedge' : 'bunkyoWall', { noFloor: true });
+
+  // SLOPE GATE: two granite posts and their wing walls at the foot of the slope.
+  for (const x of [-270, -100]) box(x, -4614, 30, 30, 210, 'stone', { group: 'bunkyoGate', noFloor: true });
+  box(-300, -4614, 40, 14, 60, 'stone', { group: 'bunkyoGate', noFloor: true });
+
+  // Utility poles (wires and crossarms are drawn), trees, lamps.
+  for (const run of BK.POLE_RUNS) for (const [x, z] of run.pts) box(x, z, 10, 10, run.base + 260, 'pole', { y0: run.base, group: 'bunkyoPole', noFloor: true });
+  for (const [x, z, h] of BK.BUNKYO_TREES) tree(x, z, h);
+  for (const l of BK.BUNKYO_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: true });
 }
 
 export const WORLD: readonly Prim[] = prims;
