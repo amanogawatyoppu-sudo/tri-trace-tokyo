@@ -232,10 +232,10 @@ describe('Bunkyo reforge: as drawn', () => {
       const scene = new THREE.Scene();
       const stats = buildBunkyo(scene);
       expect(JSON.stringify(WORLD)).toBe(before);
-      expect(stats.meshes).toBeLessThanOrEqual(45);
+      // Merged per material (the small repeated pieces too): a couple of dozen draw calls at most.
+      expect(stats.meshes).toBeLessThanOrEqual(20);
       expect(stats.triangles).toBeLessThan(60000);
       expect(stats.houses).toBe(BUNKYO_BUILT.houses.length);
-      expect(stats.instanced).toBeGreaterThanOrEqual(5);
     } finally { g.document = had; }
   });
 

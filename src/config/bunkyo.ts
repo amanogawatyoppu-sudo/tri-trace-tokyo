@@ -234,7 +234,7 @@ export const BUNKYO_LIGHTS = [0xffe2bc, 0xfff1dc, 0xead2ae] as const;
 
 /** Garden and street trees (trunk solid, crown drawn by the city renderer): x, z, crown top. */
 export const BUNKYO_TREES: readonly [number, number, number][] = [
-  [-570, -3590, H + 250], // the pine at STONE BEND
+  // (STONE BEND's pine is drawn by render/bunkyo.ts, leaning out over the corner.)
   [-480, -3712, H + 230], [-290, -3600, H + 240], // the walk over NAKA-ZAKA, RIDGE TERRACE
   [-900, -3500, 250], [-830, -3380, 230], [-940, -3330, 240], // SW yard
   [300, -3780, 260], // QUIET COURT

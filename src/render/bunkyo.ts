@@ -70,16 +70,6 @@ const rectBox = (r: Rect, y0: number, y1: number) => boxAt(r.x1 - r.x0, y1 - y0,
 const M4 = (x: number, y: number, z: number, ry = 0, sx = 1, sy = 1, sz = 1) =>
   new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(sx, sy, sz));
 
-function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, ms: THREE.Matrix4[], shadow = true): THREE.InstancedMesh {
-  const m = new THREE.InstancedMesh(geo, mat, Math.max(1, ms.length));
-  ms.forEach((x, i) => m.setMatrixAt(i, x));
-  m.count = ms.length;
-  m.castShadow = shadow;
-  m.receiveShadow = true;
-  m.computeBoundingSphere();
-  return m;
-}
-
 /** A box from a to b (a beam: rails, wires' brackets, slanted copings), `w` wide and `h` high. */
 function beam(ax: number, ay: number, az: number, bx: number, by: number, bz: number, w: number, h: number): THREE.BufferGeometry {
   const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
@@ -158,23 +148,42 @@ function ishigakiTexture(): THREE.CanvasTexture {
   return tex(c);
 }
 
-/** The concrete of a steep slope with its rings (滑り止めのリング模様), greyscale. */
+/**
+ * The concrete of a steep slope with its anti-slip rings (滑り止めのリング模様), greyscale: small,
+ * shallow grooves (a darker ring with a faint lit lower lip), close together and a little uneven,
+ * so up close the pattern reads and from a few strides away it settles into a fine texture.
+ */
 function ringTexture(): THREE.CanvasTexture {
   const [c, g] = canvas(256, 256);
   const rnd = prng(7102);
   g.fillStyle = '#bdbdbd';
   g.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 1800; i++) {
-    g.fillStyle = `rgba(0,0,0,${rnd() * 0.06})`;
+  // Weathering: soft blotches and grit.
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.015 + rnd() * 0.03})`;
+    g.beginPath();
+    g.arc(rnd() * 256, rnd() * 256, 10 + rnd() * 30, 0, Math.PI * 2);
+    g.fill();
+  }
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = `rgba(0,0,0,${rnd() * 0.07})`;
     g.fillRect(rnd() * 256, rnd() * 256, 1 + rnd() * 2, 1 + rnd() * 2);
   }
-  g.strokeStyle = 'rgba(60,60,60,0.55)';
-  g.lineWidth = 3;
-  for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) {
-    const cx = k * 64 + 32 + (r % 2) * 32, cy = r * 64 + 32;
-    for (const ox of [0, -256]) {
+  // 8 × 8 rings per tile (≈ 9 units apart, ≈ 6 across), rows offset by half a ring.
+  const R = 11, step = 32;
+  for (let r = 0; r < 8; r++) for (let k = 0; k < 8; k++) {
+    const cx = k * step + step / 2 + (r % 2) * (step / 2), cy = r * step + step / 2;
+    const dark = 0.16 + rnd() * 0.08;
+    for (const ox of cx > 256 - R - 2 ? [0, -256] : [0]) {
+      g.strokeStyle = `rgba(40,40,40,${dark})`;
+      g.lineWidth = 2;
       g.beginPath();
-      g.arc(cx + (cx + ox > 256 ? ox : 0), cy, 22, 0, Math.PI * 2);
+      g.arc(cx + ox, cy, R, 0, Math.PI * 2);
+      g.stroke();
+      g.strokeStyle = 'rgba(255,255,255,0.1)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.arc(cx + ox, cy + 1.5, R, Math.PI * 0.15, Math.PI * 0.85);
       g.stroke();
     }
   }
@@ -251,22 +260,27 @@ const cellUv = (g: THREE.BufferGeometry, cell: Cell) => {
   return g;
 };
 
-/** Plaques and the slope name posts (標柱), one atlas 1024×512. */
-const PLAQUES = [
-  ['SLOPE GATE', '坂の門'], ['RIDGE TERRACE', '高台テラス'], ['STONE BEND', '石垣の曲がり坂'], ['QUIET COURT', '静かな広場'],
-  ['RIDGE ROAD', '尾根の道'], ['WALL PATH', '塀の小径'], ['LOW ROAD', '下の道'], ['TWIN SLOPES', '双子坂'],
+/**
+ * Plaques, the slope name posts (標柱) and the route boards, one atlas 1024×320: plaques down the
+ * left half (4 × 512×80), posts along the top of the right half (8 × 64×192), route boards under them.
+ */
+const SIGN_W = 1024, SIGN_H = 320;
+const PLAQUES = [['SLOPE GATE', '坂の門'], ['RIDGE TERRACE', '高台テラス'], ['STONE BEND', '石垣の曲がり坂'], ['QUIET COURT', '静かな広場']];
+/** Posts: [name, romaji, style]. 'wood' is a timber 標柱; 'stone' is lettering cut into granite (STONE BEND's 石標, RIDGE TERRACE's 案内柱). */
+const POSTS: [string, string, 'wood' | 'stone'][] = [
+  ['上坂', 'KAMI-ZAKA', 'wood'], ['中坂', 'NAKA-ZAKA', 'wood'], ['双子坂', 'FUTAGO-ZAKA', 'wood'], ['門坂', 'MON-ZAKA', 'wood'],
+  ['曲り坂', 'MAGARI-ZAKA', 'wood'], ['石段', 'ISHIDAN', 'wood'], ['曲り坂', 'STONE BEND', 'stone'], ['高台', 'RIDGE TERRACE', 'stone'],
 ];
-const POSTS = [['上坂', 'KAMI-ZAKA'], ['中坂', 'NAKA-ZAKA'], ['双子坂', 'FUTAGO-ZAKA'], ['門坂', 'MON-ZAKA'], ['曲り坂', 'MAGARI-ZAKA'], ['石段', 'ISHIDAN']];
 const ROUTE = [['A', 'RIDGE ROAD', '尾根の道'], ['B', 'SLOPE LANE', '坂道'], ['C', 'WALL PATH', '塀の小径']];
 const SIGN = {
-  plaque: (i: number): Cell => [(i % 2) * 512, Math.floor(i / 2) * 80, 512, 80],
-  post: (i: number): Cell => [i * 64, 320, 64, 192],
-  route: (i: number): Cell => [384 + i * 213, 320, 213, 64],
+  plaque: (i: number): Cell => [0, i * 80, 512, 80],
+  post: (i: number): Cell => [512 + i * 64, 0, 64, 192],
+  route: (i: number): Cell => [512 + (i % 2) * 256, 192 + Math.floor(i / 2) * 64, 213, 64],
 };
 function signAtlas(): THREE.CanvasTexture {
-  const [c, g] = canvas(1024, 512);
+  const [c, g] = canvas(SIGN_W, SIGN_H);
   g.fillStyle = '#2b2722';
-  g.fillRect(0, 0, 1024, 512);
+  g.fillRect(0, 0, SIGN_W, SIGN_H);
   const text = (s: string, x: number, y: number, size: number, color: string, weight = '700', align: CanvasTextAlign = 'center') => {
     g.fillStyle = color;
     g.font = `${weight} ${size}px serif`;
@@ -284,17 +298,24 @@ function signAtlas(): THREE.CanvasTexture {
     text(en, x + w / 2, y + 32, 30, '#efe4c8');
     text(jp, x + w / 2, y + 60, 20, '#cdbb92', '600');
   });
-  POSTS.forEach(([jp, en], i) => {
+  POSTS.forEach(([jp, en, style], i) => {
     const [x, y, w, h] = SIGN.post(i);
-    g.fillStyle = '#b89a6c';
+    const stone = style === 'stone';
+    g.fillStyle = stone ? '#a8a398' : '#b89a6c';
     g.fillRect(x + 2, y, w - 4, h);
     g.fillStyle = 'rgba(0,0,0,0.12)';
-    for (let k = 0; k < 6; k++) g.fillRect(x + 4 + k * 10, y, 1, h);
-    [...jp].forEach((ch, k) => text(ch, x + w / 2, y + 30 + k * 40, 34, '#2a2018', '800'));
+    if (stone) for (let k = 0; k < 40; k++) g.fillRect(x + 3 + ((k * 37) % (w - 8)), y + ((k * 53) % h), 2, 2);
+    else for (let k = 0; k < 6; k++) g.fillRect(x + 4 + k * 10, y, 1, h);
+    const top = jp.length > 2 ? 30 : 46;
+    [...jp].forEach((ch, k) => {
+      // Cut lettering: a dark groove with a pale lower edge.
+      if (stone) text(ch, x + w / 2 + 1, y + top + k * 40 + 1.5, 34, 'rgba(255,255,255,0.35)', '800');
+      text(ch, x + w / 2, y + top + k * 40, 34, stone ? '#3c3a36' : '#2a2018', '800');
+    });
     g.save();
     g.translate(x + w - 9, y + h - 6);
     g.rotate(-Math.PI / 2);
-    text(en, 0, 0, 11, '#3a2e22', '700', 'left');
+    text(en, 0, 0, 11, stone ? '#4a4740' : '#3a2e22', '700', 'left');
     g.restore();
   });
   ROUTE.forEach(([k, en, jp], i) => {
@@ -307,13 +328,12 @@ function signAtlas(): THREE.CanvasTexture {
     text(en, x + 62, y + 24, 19, '#26241f', '700', 'left');
     text(jp, x + 62, y + 46, 15, '#4a463c', '600', 'left');
   });
-  const t = tex(c, false);
-  return t;
+  return tex(c, false);
 }
 function signQuad(w: number, h: number, cell: Cell, x: number, y: number, z: number, ang: number): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(w, h);
   const [cx, cy, cw, ch] = cell, uv = g.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, (cx + uv.getX(i) * cw) / 1024, 1 - (cy + (1 - uv.getY(i)) * ch) / 512);
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (cx + uv.getX(i) * cw) / SIGN_W, 1 - (cy + (1 - uv.getY(i)) * ch) / SIGN_H);
   return g.rotateY(ang).translate(x, y, z);
 }
 
@@ -334,6 +354,13 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
     add(m);
   };
   const H = RIDGE_H;
+  // Everything in the shared fine-grain finish (house bodies, plaster walls, hedges, dressed granite,
+  // foliage) is one mesh with one noise texture; plain vertex-coloured pieces likewise.
+  const noise: THREE.BufferGeometry[] = [], small: THREE.BufferGeometry[] = [], iron: THREE.BufferGeometry[] = [];
+  const glow: THREE.BufferGeometry[] = [];
+  const gl = (g: THREE.BufferGeometry, col: number) => glow.push(tint(g, col));
+  /** A unit-size piece placed by a matrix, in a colour (for pieces that used to be instanced). */
+  const placed = (g: THREE.BufferGeometry, m: THREE.Matrix4, col: number) => tint(g.clone().applyMatrix4(m), col);
 
   // ------------------------------------------------------------ flat ground: lanes, the ridge's tops, gardens, the court
   const asphalt: THREE.BufferGeometry[] = [], setts: THREE.BufferGeometry[] = [];
@@ -425,12 +452,26 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
     sbox(body, wl.kind === 'stone' ? C.ohya : C.block, wl.kind === 'stone' ? 70 : 40);
     sbox(rectBox({ x0: wl.x0 - 2, x1: wl.x1 + 2, z0: wl.z0 - 2, z1: wl.z1 + 2 }, wl.base + wl.h - 5, wl.base + wl.h), C.coping, 60);
   }
-  // SLOPE GATE: the two granite posts with caps and the low wing wall (from the world's own solids).
+  const gatePosts: [number, number, number][] = [];
+  // SLOPE GATE: two dressed granite gate posts (門柱) with tiled hip caps and a small lantern on
+  // each, and the low wing wall (from the world's own solids); the west post carries the slope's name.
   for (const p of WORLD) {
     if (p.group !== 'bunkyoGate' || p.kind !== 'box') continue;
     const b = p as BoxPrim;
-    sbox(boxAt(b.w, b.y1 - b.y0 - 10, b.d, b.x, (b.y0 + b.y1 - 10) / 2, b.z), C.granite, 80);
-    sbox(boxAt(b.w + 10, 10, b.d + 10, b.x, b.y1 - 5, b.z), C.stoneDark, 80);
+    if (b.y1 - b.y0 < 100) {
+      sbox(boxAt(b.w, b.y1 - b.y0 - 10, b.d, b.x, (b.y0 + b.y1 - 10) / 2, b.z), C.granite, 80);
+      sbox(boxAt(b.w + 10, 10, b.d + 10, b.x, b.y1 - 5, b.z), C.stoneDark, 80);
+      continue;
+    }
+    noise.push(worldUv(tint(boxAt(b.w, b.y1 - b.y0 - 16, b.d, b.x, (b.y0 + b.y1 - 16) / 2, b.z), 0x9a958b), 40));
+    noise.push(worldUv(tint(boxAt(b.w + 6, 8, b.d + 6, b.x, b.y0 + 4, b.z), C.stoneDark), 40)); // plinth
+    noise.push(worldUv(tint(boxAt(b.w + 8, 4, b.d + 8, b.x, b.y1 - 14, b.z), C.coping), 40)); // band under the cap
+    small.push(tint(new THREE.ConeGeometry((b.w + 16) * 0.72, 14, 4).rotateY(Math.PI / 4).translate(b.x, b.y1 - 5, b.z), C.tile));
+    // The lantern: a small warm box under a little iron roof.
+    gl(boxAt(10, 12, 10, b.x, b.y1 + 8, b.z), C.lamp);
+    iron.push(tint(new THREE.ConeGeometry(10, 6, 4).rotateY(Math.PI / 4).translate(b.x, b.y1 + 17, b.z), C.iron));
+    iron.push(tint(boxAt(3, 4, 3, b.x, b.y1 + 1, b.z), C.iron));
+    gatePosts.push([b.x, b.z, b.d]);
   }
   // Terrace stair treads (granite) — the stair's solid is a ramp; its steps are drawn here.
   for (const s of SLOPES) {
@@ -473,8 +514,6 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
 
   // ------------------------------------------------------------ houses: bodies, roofs, windows, doors, balconies
   const bodies: THREE.BufferGeometry[] = [], roofs: THREE.BufferGeometry[] = [], wins: THREE.BufferGeometry[] = [], litWins: THREE.BufferGeometry[] = [];
-  const glow: THREE.BufferGeometry[] = [];
-  const gl = (g: THREE.BufferGeometry, col: number) => glow.push(tint(g, col));
   const SKIN: Record<BkHouse['skin'], number> = { white: C.white, beige: C.beige, grey: C.grey, wood: C.wood };
   const gateLamps: [number, number, number][] = [];
   for (const hs of BUNKYO_BUILT.houses) {
@@ -565,7 +604,7 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
       }
     }
   }
-  merged(bodies, new THREE.MeshStandardMaterial({ color: 0xffffff, map: detailNoise(), vertexColors: true, roughness: 0.9 }));
+  noise.push(...bodies);
   merged(roofs, new THREE.MeshStandardMaterial({ color: 0xffffff, map: roofTileTexture(), vertexColors: true, roughness: 0.8 }));
   const winTex = windowAtlas();
   merged(wins, new THREE.MeshStandardMaterial({ map: winTex, roughness: 0.6 }), false);
@@ -598,11 +637,10 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
   for (const [x, z, y] of [[-600, -3560, H], [-545, -3630, H], [-600, -3620, H], [270, -3790, 0], [330, -3770, 0]] as const) {
     green.push(worldUv(tint(boxAt(30, 18, 26, x, y + 9, z), new THREE.Color(C.hedge).multiplyScalar(1.1)), 50));
   }
-  merged(plaster, new THREE.MeshStandardMaterial({ color: 0xffffff, map: detailNoise(), vertexColors: true, roughness: 0.95 }));
-  merged(green, new THREE.MeshStandardMaterial({ color: 0xffffff, map: detailNoise(), vertexColors: true, roughness: 1 }));
+  noise.push(...plaster, ...green);
 
   // ------------------------------------------------------------ guard fences: kerb, posts and rails (iron), following the ground
-  const iron: THREE.BufferGeometry[] = [], posts: THREE.Matrix4[] = [];
+  const posts: THREE.Matrix4[] = [];
   for (const p of WORLD) {
     if (p.kind !== 'box' || (p.group !== 'bunkyoFence' && !(p.group === 'bunkyoSlope' && p.mat === 'metal'))) continue;
     const alongX = p.w >= p.d, len = alongX ? p.w : p.d;
@@ -618,7 +656,6 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
       posts.push(M4(x, y + 17, z, 0, 1, 30 / 26, 1));
     }
   }
-  merged(iron, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.6, metalness: 0.3 }));
 
   // ------------------------------------------------------------ 電柱 and wires; lamps (posts and heads)
   const poleM: THREE.Matrix4[] = [], armM: THREE.Matrix4[] = [], transM: THREE.Matrix4[] = [];
@@ -642,10 +679,13 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
       }
     });
   }
-  const concrete = new THREE.MeshStandardMaterial({ color: C.pole, roughness: 0.85 });
-  add(instanced(new THREE.CylinderGeometry(4, 5.5, 26, 8), concrete, poleM));
-  add(instanced(new THREE.BoxGeometry(5, 5, 60), new THREE.MeshStandardMaterial({ color: 0x5d5f62, roughness: 0.7 }), armM, false));
-  add(instanced(new THREE.CylinderGeometry(7, 7, 22, 8), new THREE.MeshStandardMaterial({ color: 0x8a8d90, roughness: 0.6 }), transM));
+  // Poles, cross-arms and transformers: one mesh (a couple of dozen pieces).
+  const poleGeo: THREE.BufferGeometry[] = [];
+  const poleCyl = new THREE.CylinderGeometry(4, 5.5, 26, 8), armBox = new THREE.BoxGeometry(5, 5, 60), transCyl = new THREE.CylinderGeometry(7, 7, 22, 8);
+  for (const m of poleM) poleGeo.push(placed(poleCyl, m, C.pole));
+  for (const m of armM) poleGeo.push(placed(armBox, m, 0x5d5f62));
+  for (const m of transM) poleGeo.push(placed(transCyl, m, 0x8a8d90));
+  merged(poleGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.8 }));
   {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(wirePts, 3));
@@ -726,21 +766,57 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
   board(2, -840, -4560, Math.PI / 2); // C, the WALL PATH's north mouth
   board(1, -740, -4050, Math.PI / 2); // B, at KAMI-ZAKA's foot
   board(0, -232, -4150, Math.PI / 2); // A on the ridge
-  const signTex = signAtlas();
-  const signMat = new THREE.MeshStandardMaterial({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.06, roughness: 0.8, side: THREE.DoubleSide });
-  glowAtNight(signMat, 0.06, 0.3);
-  add(new THREE.Mesh(mergeGeometries(signs)!, signMat));
-  merged(woodPosts, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.85 }));
+  small.push(...woodPosts);
+
+  // ------------------------------------------------------------ the three landmarks' own marks (small, stone and timber, unlit)
+  // SLOPE GATE: the slope's name on a timber board on the west post, a small plaque on the east one (both facing the avenue).
+  for (const [x, z, d] of gatePosts) {
+    const fz = z - d / 2 - 0.6;
+    if (x < -185) {
+      small.push(tint(boxAt(20, 62, 2, x, 96, fz + 0.4), 0x6a5a44));
+      signs.push(signQuad(16, 48, SIGN.post(3), x, 96, fz - 0.8, Math.PI));
+    } else signs.push(signQuad(26, 26 * 0.156, SIGN.plaque(0), x, 110, fz, Math.PI));
+  }
+  // RIDGE TERRACE: a granite 案内柱 (guide pillar) by the stair head, its name cut on four sides.
+  {
+    const x = -262, z = -3548;
+    noise.push(worldUv(tint(boxAt(18, 96, 18, x, H + 48, z), 0x9a958b), 40));
+    noise.push(worldUv(tint(boxAt(24, 6, 24, x, H + 3, z), C.stoneDark), 40));
+    small.push(tint(new THREE.ConeGeometry(15, 9, 4).rotateY(Math.PI / 4).translate(x, H + 100.5, z), C.stoneDark));
+    for (const k of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) signs.push(signQuad(13, 39, SIGN.post(7), x + Math.sin(k) * 9.2, H + 62, z + Math.cos(k) * 9.2, k));
+  }
+  // STONE BEND: a granite 石標 in the corner landing's outer (south-east) corner, straight ahead running up the
+  // bend and out of the line round the turn, and the garden's pine (見越しの松) leaning out over the hedge toward the corner.
+  {
+    const x = -422, z = -3434;
+    noise.push(worldUv(tint(boxAt(20, 84, 20, x, BEND_H + 42, z), 0xa29d92), 40));
+    small.push(tint(new THREE.ConeGeometry(15.5, 8, 4).rotateY(Math.PI / 4).translate(x, BEND_H + 88, z), C.stoneDark));
+    for (const k of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) signs.push(signQuad(15, 45, SIGN.post(6), x + Math.sin(k) * 10.2, BEND_H + 52, z + Math.cos(k) * 10.2, k));
+    // The pine: a trunk in three leaning pieces, flat layered pads of needles.
+    const trunk: [number, number, number][] = [[-578, H, -3602], [-566, H + 70, -3585], [-542, H + 125, -3560], [-505, H + 160, -3528]];
+    for (let i = 0; i < trunk.length - 1; i++) {
+      const [ax, ay, az] = trunk[i], [bx, by, bz] = trunk[i + 1];
+      small.push(tint(beam(ax, ay, az, bx, by, bz, 11 - i * 2, 11 - i * 2), 0x5a4636));
+    }
+    small.push(tint(beam(-560, H + 95, -3578, -600, H + 128, -3600, 5, 5), 0x5a4636), tint(beam(-536, H + 132, -3556, -540, H + 175, -3528, 5, 5), 0x5a4636));
+    const pad = (px: number, py: number, pz: number, r: number, k: number) =>
+      noise.push(tint(new THREE.SphereGeometry(r, 9, 5).scale(1, 0.32, 0.85).rotateY(k).translate(px, py, pz), 0x2b3c25));
+    pad(-500, H + 166, -3524, 34, 0.4); pad(-530, H + 140, -3548, 26, 1.1); pad(-604, H + 132, -3602, 24, 0.2);
+    pad(-541, H + 182, -3527, 22, 0.8); pad(-563, H + 112, -3590, 20, 1.6);
+  }
 
   // ------------------------------------------------------------ court and terrace furniture: benches, a stone lantern, a small shrine
   const bench = mergeGeometries([boxAt(60, 4, 16, 0, 17, 0), boxAt(4, 17, 14, -24, 8.5, 0), boxAt(4, 17, 14, 24, 8.5, 0)].map((g) => g.toNonIndexed()))!;
-  const benches: THREE.Matrix4[] = [];
-  const seat = (x: number, z: number, ry: number) => benches.push(M4(x, bunkyoGround(x, z), z, ry));
+  const seat = (x: number, z: number, ry: number) => small.push(placed(bench, M4(x, bunkyoGround(x, z), z, ry), C.wood));
   seat(240, -3848, 0); seat(340, -3848, 0); seat(240, -3712, Math.PI); seat(340, -3712, Math.PI); // QUIET COURT, along its edges
-  seat(-300, -3555, Math.PI); seat(-180, -3640, 0); // RIDGE TERRACE, facing the view south
   seat(-380, -3760, 0); // the walk over NAKA-ZAKA
-  add(instanced(bench, new THREE.MeshStandardMaterial({ color: C.wood, roughness: 0.8 }), benches));
-  const small: THREE.BufferGeometry[] = [];
+  // RIDGE TERRACE's own benches: long, a thick timber seat on two granite blocks, facing the view south.
+  const stoneBench = (x: number, z: number, ry: number) => {
+    const y = bunkyoGround(x, z), m = M4(x, y, z, ry);
+    for (const ox of [-34, 34]) noise.push(placed(boxAt(16, 16, 20, ox, 8, 0).toNonIndexed(), m, 0x9a958b));
+    small.push(placed(boxAt(96, 6, 24, 0, 19, 0).toNonIndexed(), m, 0x6e5238));
+  };
+  stoneBench(-300, -3556, Math.PI); stoneBench(-180, -3640, 0);
   // 石灯籠 in the court and at STONE BEND's corner; a small 祠 (shrine) at the court's east side.
   for (const [x, z] of [[205, -3790], [-505, -3435]] as const) {
     const y = bunkyoGround(x, z);
@@ -750,12 +826,18 @@ export function buildBunkyo(scene: THREE.Scene): BunkyoStats {
   small.push(tint(boxAt(30, 30, 24, 402, 15, -3844), C.wood), tint(new THREE.ConeGeometry(26, 14, 4).rotateY(Math.PI / 4).translate(402, 37, -3844), C.tile));
   small.push(tint(boxAt(10, 26, 50, 182, 13, -3725), C.granite)); // the court's name stone
   merged(small, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.9 }));
+  merged(noise, new THREE.MeshStandardMaterial({ color: 0xffffff, map: detailNoise(), vertexColors: true, roughness: 0.95 }));
+  const signTex = signAtlas();
+  const signMat = new THREE.MeshStandardMaterial({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.06, roughness: 0.8, side: THREE.DoubleSide });
+  glowAtNight(signMat, 0.06, 0.3);
+  add(new THREE.Mesh(mergeGeometries(signs)!, signMat));
 
-  // ------------------------------------------------------------ dark iron (posts, lamp arms, board posts) and the glow mesh
-  const ironMat = new THREE.MeshStandardMaterial({ color: C.iron, roughness: 0.55, metalness: 0.35 });
-  add(instanced(new THREE.CylinderGeometry(1.6, 1.6, 26, 5), ironMat, posts, false));
-  add(instanced(new THREE.CylinderGeometry(2.4, 3.2, 26, 6), ironMat, [...lampPosts, ...footPosts, ...boardPosts]));
-  add(instanced(new THREE.BoxGeometry(22, 3, 3), ironMat, lampArms, false));
+  // ------------------------------------------------------------ dark iron (fence rails and posts, lamp posts and arms, board posts) and the glow mesh
+  const fencePost = new THREE.CylinderGeometry(1.6, 1.6, 26, 5), lampPost = new THREE.CylinderGeometry(2.4, 3.2, 26, 6), lampArm = new THREE.BoxGeometry(22, 3, 3);
+  for (const m of posts) iron.push(placed(fencePost, m, C.iron));
+  for (const m of [...lampPosts, ...footPosts, ...boardPosts]) iron.push(placed(lampPost, m, C.iron));
+  for (const m of lampArms) iron.push(placed(lampArm, m, C.iron));
+  merged(iron, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.58, metalness: 0.32 }));
   const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true });
   NIGHT_GLOW.push({ set: (k) => { glowMat.color.setScalar(0.7 + 0.45 * k); } });
   merged(glow, glowMat, false);
