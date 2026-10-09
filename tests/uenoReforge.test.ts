@@ -13,7 +13,7 @@ import { inLight } from '../src/sim/night';
 import { SECTORS, sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
 import { inIkebukuro } from '../src/config/ikebukuro';
-import { inShinagawa } from './helpers';
+import { inShinagawa, inTokyoTower } from './helpers';
 
 /**
  * MAP REFORGE (parallel A): 上野 GREEN HEIGHTS (layout in config/ueno.ts). Everything outside the
@@ -24,7 +24,8 @@ import { inShinagawa } from './helpers';
  */
 const UENO = 4;
 const BEFORE = {
-  world: 'dcacc84f', n: 794, lights: '630bd93e', buildings: '40c9a6af', poles: '9cd049e0', wires: 'f03feef7', streets: 'abf581dd', places: 'b6abbd6c',
+  // 東京タワー (parallel E) is left out as well: re-taken on map-reforge-parallel-integrated (897dc77) with it excluded.
+  world: '8b796f7a', n: 773, lights: '87946cae', buildings: '2f0e8c61', poles: '9cd049e0', wires: 'f03feef7', streets: '93b15c00', places: 'ad4d1ea1',
 };
 const hash = (v: unknown) => {
   const s = JSON.stringify(v);
@@ -32,8 +33,8 @@ const hash = (v: unknown) => {
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
   return h.toString(16);
 };
-/** The other parallel reforges (池袋, 品川). */
-const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p);
+/** The other parallel reforges (池袋, 品川, 東京タワー). */
+const others = (p: { x: number; z: number }) => inIkebukuro(p.x, p.z) || inShinagawa(p) || inTokyoTower(p);
 const out = (p: { x: number; z: number }) => !inUenoZone(p.x, p.z) && !others(p);
 const mine = (p: Prim) => inUenoZone(p.x, p.z);
 /** Solids someone on the ground walks into (not floors, not water, not the hill's own terrain). */
@@ -47,7 +48,7 @@ describe('Ueno reforge: the rest of Tokyo is untouched', () => {
       world: hash(WORLD.filter(out)), n: WORLD.filter(out).length, lights: hash(LIGHTS.filter(out)), buildings: hash(BUILDINGS.filter((b) => (b.outside || !inUenoZone(b.x, b.z)) && !others(b))),
       poles: hash(POLES.filter(out)), wires: hash(WIRES.filter(([a, b]) => out(POLES[a]) && out(POLES[b])).map(([a, b]) => [POLES[a], POLES[b]])),
       streets: hash([STREET_SEGS.filter(out), INTERSECTIONS.filter(out), CROSSWALKS.filter(out), SIGNALS.filter(out), BLOCKS.filter(blk), PARKINGS.filter(out), FOOTBRIDGES]),
-      places: hash([BASE_SITES, JAIL_SITES, SECTORS.filter((s) => s.id !== UENO).map((s) => sectorPoint(s.id))]),
+      places: hash([BASE_SITES, JAIL_SITES, SECTORS.filter((s) => s.id !== UENO && !inTokyoTower(s.pointNear)).map((s) => sectorPoint(s.id))]),
     }).toEqual(BEFORE);
   });
 

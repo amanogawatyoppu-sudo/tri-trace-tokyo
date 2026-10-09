@@ -7,6 +7,7 @@ import { BOUNDS, BUILDINGS, GROUND_FLOOR, LIGHTS, WORLD, insideLoop } from '../c
 import { POINT_R, SECTORS, sectorAt, sectorPoint } from '../sim/war';
 import { SHIBUYA_ZONES } from '../config/shibuya';
 import { DATA_JUNCTION } from '../config/akihabara';
+import { SKY_PLAZA } from '../config/tokyoTower';
 import { nearFade } from './city';
 import { radialGlowTexture } from './textures';
 import { NIGHT_GLOW } from './nightGlow';
@@ -196,9 +197,16 @@ export class WarView {
         banner.emissiveIntensity = 0.45;
         nearFade(banner, 40, 160);
       }
+      // 東京タワー's point (SKY PLAZA, at the tower's foot): the floodlit tower is the beacon, so a small, dim glow.
+      const P = SKY_PLAZA, inTower = p.x > P.x0 && p.x < P.x1 && p.z > P.z0 && p.z < P.z1;
+      if (inTower) {
+        poolMesh.scale.setScalar(0.55);
+        banner.emissiveIntensity = 0.45;
+        nearFade(banner, 40, 160);
+      }
       g.add(beamMesh, coreMesh, poolMesh);
       scene.add(g);
-      this.points.push({ beam, core, pool, banner, canvas, tex, ring, gauge, flag, glare: onStairs ? 0.45 : inShibuya ? 0.55 : inAkiba ? 0.45 : 1, owner: '', shownProgress: 0 });
+      this.points.push({ beam, core, pool, banner, canvas, tex, ring, gauge, flag, glare: onStairs ? 0.45 : inShibuya ? 0.55 : inAkiba || inTower ? 0.45 : 1, owner: '', shownProgress: 0 });
     });
   }
 

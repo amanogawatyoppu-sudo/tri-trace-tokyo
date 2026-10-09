@@ -9,7 +9,7 @@ import { NATIONS } from '../src/config/nations';
 import { planPath } from '../src/ai/nav';
 import { sectorPoint } from '../src/sim/war';
 import { canWalk, lineOfSight, supportHeight, walkLine } from '../src/sim/systems/world';
-import { inShinagawa, inUeno } from './helpers';
+import { inShinagawa, inTokyoTower, inUeno } from './helpers';
 import { inIkebukuro } from '../src/config/ikebukuro';
 
 /**
@@ -38,7 +38,7 @@ const clearance = (x: number, z: number) => {
 describe('Shinagawa reforge: everything outside the district is untouched', () => {
   it('leaves every primitive, lamp, building, pole, street, crossing, block and signal outside the area exactly as on map-reforge-base', () => {
     // Ueno and Ikebukuro (the other parallel reforges, merged in map-reforge-parallel-integrated) are left out too.
-    const out = (p: { x: number; z: number }) => !inShinagawa(p) && !inUeno(p) && !inIkebukuro(p.x, p.z);
+    const out = (p: { x: number; z: number }) => !inShinagawa(p) && !inUeno(p) && !inIkebukuro(p.x, p.z) && !inTokyoTower(p);
     const o = <T extends { x: number; z: number }>(a: readonly T[]) => a.filter(out);
     expect({
       world: hash(o(WORLD)), lights: hash(o(LIGHTS)), buildings: hash(o(BUILDINGS)), poles: hash(o(POLES)), streets: hash(o(STREET_SEGS)),
@@ -46,8 +46,9 @@ describe('Shinagawa reforge: everything outside the district is untouched', () =
       signals: hash(o(SIGNALS)), zebra: hash(o(CROSSWALKS)), parking: hash(o(PARKINGS)), n: o(WORLD).length,
     }).toEqual({
       // Taken on map-reforge-base (bbe30ec: 渋谷 + 新宿 + 秋葉原) before 品川 was touched, with 上野 and 池袋 left out.
-      world: 'dcacc84f', lights: '630bd93e', buildings: '40c9a6af', poles: '9cd049e0', streets: 'ef0c1abf',
-      crossings: '9b5a209c', blocks: 'ca9ee239', signals: '984f4ca8', zebra: '1116d479', parking: '4a570927', n: 794,
+      // 東京タワー (parallel E) is left out as well: re-taken on map-reforge-parallel-integrated (897dc77) with it excluded.
+      world: '8b796f7a', lights: '87946cae', buildings: '2f0e8c61', poles: '9cd049e0', streets: 'ef0c1abf',
+      crossings: 'ca9d3b4', blocks: 'ca9ee239', signals: '9f744c08', zebra: 'd0e0b952', parking: '4a570927', n: 773,
     });
   });
 

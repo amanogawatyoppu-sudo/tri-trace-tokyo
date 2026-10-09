@@ -67,8 +67,8 @@ describe('map: nothing overlaps', () => {
         clash.push(`${a.mat}:${a.group ?? ''}@(${Math.round(a.x)},${Math.round(a.z)}) × ${b.mat}:${b.group ?? ''}@(${Math.round(b.x)},${Math.round(b.z)})`);
       }
     }
-    // Landmark grounds (palace, hills) carry their own ramps and buildings on top: allowed.
-    expect(clash.filter((c) => !/palace|keep|hill|museum|tokyoTower|footTown|dietTower|walkup|arcade|stadium/.test(c))).toEqual([]);
+    // Landmark grounds (palace, hills) carry their own ramps and buildings on top: allowed (東京タワー's rails stand on its stairs).
+    expect(clash.filter((c) => !/palace|keep|hill|museum|tokyoTower|footTown|dietTower|walkup|arcade|stadium|ttwRail/.test(c))).toEqual([]);
   });
 
   it('traffic signals do not stand inside footbridge stairs', () => {

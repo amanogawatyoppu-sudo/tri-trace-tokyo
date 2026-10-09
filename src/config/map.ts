@@ -21,6 +21,8 @@ import { IKB_BUILDINGS, IKB_DECKS, IKB_LAMPS, IKB_PLANT, IKB_STAIRS, IKB_ZONES, 
 import type { IkbBuilding } from './ikebukuro';
 import * as SHG from './shinagawa';
 import type { ShinagawaBuilding } from './shinagawa';
+import * as TTW from './tokyoTower';
+import type { TtwStair } from './tokyoTower';
 
 /**
  * v7.5 battlefield: Tokyo inside the JR Yamanote loop, at human scale.
@@ -1666,6 +1668,173 @@ export const SHINAGAWA_BUILT: { buildings: (ShinagawaBuilding & { h: number })[]
   for (const l of SHG.SHINAGAWA_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
 }
 
+// ---------------------------------------------------------------- 東京タワー RED HEIGHT (MAP REFORGE parallel E)
+/**
+ * The ground round Tokyo Tower is rebuilt by hand (config/tokyoTower.ts) after the generated
+ * city, the same way as the other reforged districts: the generated pieces in the area, the old
+ * FootTown block and its stair, and the 増上寺 hall are taken out, and RED HEIGHT put in — the
+ * RED AXIS through TOWER GATE, SKY PLAZA under the tower, the TERRACE RING and RED TERRACE, and
+ * the SERVICE SLOPE behind SERVICE WALL. The legs keep their place; the tower itself is drawn
+ * by render/tokyoTower.ts. Everything new is in groups 'ttw*'.
+ */
+{
+  const inZone = (x: number, z: number) => TTW.inTokyoTowerZone(x, z);
+  const GENERATED = new Set<Material>(['bldg', 'pole', 'car', 'vending', 'tree', 'sidewalk']);
+  const OLD = new Set(['tokyoTowerLeg', 'tokyoTowerSpire', 'tokyoTower', 'footTown', 'temple']);
+  for (let i = prims.length - 1; i >= 0; i--) {
+    const p = prims[i];
+    if (!inZone(p.x, p.z)) continue;
+    // (FootTown's roof parapets are plain metal boxes without a group.)
+    if ((GENERATED.has(p.mat) && (p.group === undefined || p.mat === 'vending' || p.mat === 'car')) || OLD.has(p.group ?? '') || (p.mat === 'metal' && p.group === undefined)) prims.splice(i, 1);
+  }
+  const keep = <T,>(arr: T[], ok: (v: T) => boolean) => {
+    const out = arr.filter(ok);
+    arr.length = 0;
+    arr.push(...out);
+  };
+  const out = (p: Point) => !inZone(p.x, p.z);
+  keep(BUILDINGS, (b) => b.outside || out(b));
+  keep(PARKINGS, out);
+  keep(LIGHTS, out);
+  keep(SIGNALS, out);
+  keep(CROSSWALKS, out);
+  keep(BLOCKS, (b) => out({ x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2 }));
+  {
+    const remap = new Map<number, number>();
+    const old = POLES.slice();
+    POLES.length = 0;
+    old.forEach((p, i) => { if (out(p)) { remap.set(i, POLES.length); POLES.push(p); } });
+    const wires = WIRES.filter(([a, b]) => remap.has(a) && remap.has(b)).map(([a, b]) => [remap.get(a)!, remap.get(b)!] as [number, number]);
+    WIRES.length = 0;
+    WIRES.push(...wires);
+  }
+
+  const rect = (r: { x0: number; z0: number; x1: number; z1: number }, y1: number, mat: Material, extra: Partial<BoxPrim> = {}) =>
+    box((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2, r.x1 - r.x0, r.z1 - r.z0, y1, mat, extra);
+  const { RING_H, RED_H } = TTW;
+
+  // The tower: the legs on their concrete footings (solid to sight and the camera up to 420, where the lattice
+  // leans in), and the body above them (out of reach).
+  for (const [x, z] of TTW.LEGS) {
+    box(x, z, TTW.FOOTING, TTW.FOOTING, TTW.FOOTING_H, 'concrete', { group: 'ttwLeg', noFloor: true });
+    box(x, z, TTW.LEG, TTW.LEG, 420, 'steel', { group: 'ttwLeg', noFloor: true });
+  }
+  box(TTW.TT.x, TTW.TT.z, 90, 90, TOKYO_TOWER_H, 'steel', { y0: 700, group: 'ttwSpire', noFloor: true });
+
+  // B. TERRACE RING: solid terraces, the bridge over the service tunnel, RED TERRACE over the axis.
+  for (const t of TTW.TERRACES) rect(t, RING_H, 'stone', { group: 'ttwTerrace' });
+  rect(TTW.TUNNEL, RING_H, 'stone', { y0: RING_H - SLAB, group: 'ttwTerrace' });
+  rect(TTW.RED_TERRACE, RED_H, 'steel', { y0: RED_H - SLAB, group: 'ttwRed' });
+  for (const s of TTW.STAIRS) {
+    prims.push({
+      kind: 'ramp', x: (s.x0 + s.x1) / 2, z: (s.z0 + s.z1) / 2, w: s.x1 - s.x0, d: s.z1 - s.z0, y0: 0,
+      axis: s.axis, dir: s.dir, hLow: s.low, hHigh: s.high, style: s.style, mat: s.style === 'slope' ? 'concrete' : 'stone', group: 'ttwStair',
+    });
+  }
+
+  // Railings: every edge of a walkable top whose outside is neither another walkable top at the
+  // same height nor a wall rising above it. Steel mesh: it stops bodies, not eyes (the ring sees the plaza).
+  const RAIL = 6, RAIL_H = 34, STEP = 10, STEP_UP_RAIL = 12;
+  type Top = { r: { x0: number; z0: number; x1: number; z1: number }; y: (x: number, z: number) => number };
+  const stairY = (s: TtwStair) => (x: number, z: number) => {
+    const len = s.axis === 'x' ? s.x1 - s.x0 : s.z1 - s.z0;
+    const u = (s.axis === 'x' ? x - s.x0 : z - s.z0) / len;
+    return s.low + (s.high - s.low) * Math.min(1, Math.max(0, s.dir === 1 ? u : 1 - u));
+  };
+  const tops: Top[] = [
+    ...TTW.TERRACES.map((t) => ({ r: t, y: () => RING_H })),
+    { r: TTW.TUNNEL, y: () => RING_H },
+    { r: TTW.RED_TERRACE, y: () => RED_H },
+    ...TTW.STAIRS.map((s) => ({ r: s as Top['r'], y: stairY(s) })),
+  ];
+  const walls: { r: Top['r']; top: number }[] = [...TTW.SERVICE_WALL.map((w) => ({ r: w, top: w.h }))];
+  const onRect = (r: Top['r'], x: number, z: number) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
+  const openAt = (x: number, z: number, y: number) =>
+    tops.some((w) => onRect(w.r, x, z) && Math.abs(w.y(x, z) - y) <= STEP_UP_RAIL) || walls.some((w) => onRect(w.r, x, z) && w.top > y + STEP_UP_RAIL);
+  const railRuns = (r: Top['r'], y: number) => {
+    const edges: [number, number, number, number, number, number][] = [
+      [r.x0, r.z0, r.x1, r.z0, 0, -1], [r.x0, r.z1, r.x1, r.z1, 0, 1], [r.x0, r.z0, r.x0, r.z1, -1, 0], [r.x1, r.z0, r.x1, r.z1, 1, 0],
+    ];
+    for (const [ax, az, bx, bz, nx, nz] of edges) {
+      const len = Math.hypot(bx - ax, bz - az);
+      let run0 = -1;
+      for (let t = 0; t <= len; t += STEP) {
+        const m = Math.min(t + STEP / 2, len);
+        const px = ax + ((bx - ax) * m) / len, pz = az + ((bz - az) * m) / len;
+        const open = t < len && !openAt(px + nx * 4, pz + nz * 4, y);
+        if (open && run0 < 0) run0 = t;
+        if ((!open || t + STEP > len) && run0 >= 0) {
+          const t1 = open ? len : t, L = t1 - run0;
+          if (L > 2) {
+            const cx = ax + ((bx - ax) * (run0 + L / 2)) / len - nx * (RAIL / 2), cz = az + ((bz - az) * (run0 + L / 2)) / len - nz * (RAIL / 2);
+            box(cx, cz, nx ? RAIL : L, nx ? L : RAIL, y + RAIL_H, 'metal', { y0: y, group: 'ttwRail', noFloor: true, seeThrough: true });
+          }
+          run0 = -1;
+        }
+      }
+    }
+  };
+  for (const t of [...TTW.TERRACES, TTW.TUNNEL]) railRuns(t, RING_H);
+  railRuns(TTW.RED_TERRACE, RED_H);
+  // Stair and slope sides: rails in short rising pieces where the side is open and the drop is real
+  // (the bottom of a flight stays open: stepping off there is a short hop, never a trap).
+  for (const s of TTW.STAIRS) {
+    const along = s.axis === 'x' ? [s.x0, s.x1] : [s.z0, s.z1];
+    const sides = s.axis === 'x' ? [[s.z0, -1], [s.z1, 1]] : [[s.x0, -1], [s.x1, 1]];
+    const hAt = (u: number) => (s.axis === 'x' ? stairY(s)(u, s.z0) : stairY(s)(s.x0, u));
+    for (const [edge, n] of sides) {
+      for (let u = along[0]; u < along[1] - 1; u += 20) {
+        const u1 = Math.min(u + 20, along[1]), um = (u + u1) / 2, h = hAt(um);
+        const ox = s.axis === 'x' ? um : edge + n * 4, oz = s.axis === 'x' ? edge + n * 4 : um;
+        if (openAt(ox, oz, h)) continue;
+        const lo = Math.min(hAt(u), hAt(u1)), hi = Math.max(hAt(u), hAt(u1));
+        if (lo - s.low < 40 && s.low === 0) continue;
+        const fx = s.axis === 'x' ? um : edge - n * (RAIL / 2), fz = s.axis === 'x' ? edge - n * (RAIL / 2) : um;
+        box(fx, fz, s.axis === 'x' ? u1 - u : RAIL, s.axis === 'x' ? RAIL : u1 - u, hi + RAIL_H, 'metal', { y0: Math.max(0, lo - 10), group: 'ttwRail', noFloor: true, seeThrough: true });
+      }
+    }
+    // A side stair (along a wall) ends in the open at its top: a rail across its high end.
+    const hiEnd = s.axis === 'x' ? (s.dir === 1 ? s.x1 : s.x0) : (s.dir === 1 ? s.z1 : s.z0);
+    const cross = s.axis === 'x' ? [s.z0, s.z1] : [s.x0, s.x1], n = s.dir;
+    let run0 = -1;
+    for (let v = cross[0]; v <= cross[1]; v += STEP) {
+      const vm = Math.min(v + STEP / 2, cross[1]);
+      const ox = s.axis === 'x' ? hiEnd + n * 4 : vm, oz = s.axis === 'x' ? vm : hiEnd + n * 4;
+      const open = v < cross[1] && !openAt(ox, oz, s.high);
+      if (open && run0 < 0) run0 = v;
+      if ((!open || v + STEP > cross[1]) && run0 >= 0) {
+        const v1 = open ? cross[1] : v, L = v1 - run0, c = run0 + L / 2;
+        if (L > 2) {
+          if (s.axis === 'x') box(hiEnd - n * (RAIL / 2), c, RAIL, L, s.high + RAIL_H, 'metal', { y0: s.high, group: 'ttwRail', noFloor: true, seeThrough: true });
+          else box(c, hiEnd - n * (RAIL / 2), L, RAIL, s.high + RAIL_H, 'metal', { y0: s.high, group: 'ttwRail', noFloor: true, seeThrough: true });
+        }
+        run0 = -1;
+      }
+    }
+  }
+
+  // C. SERVICE WALL (equipment, no roof to stand on) and the kiosk at the lane's mouth.
+  for (const w of TTW.SERVICE_WALL) rect(w, w.h, 'bldg', { group: 'ttwService', noFloor: true });
+  rect(TTW.SERVICE_KIOSK, TTW.SERVICE_KIOSK.h, 'bldg', { group: 'ttwService', noFloor: true });
+  // TOWER GATE: piers and the lintel over the axis; low planters along the plaza's south edge.
+  {
+    const G = TTW.GATE;
+    for (const p of [G.pierW, G.pierE]) rect({ x0: p.x0, x1: p.x1, z0: G.z0, z1: G.z1 }, G.top, 'concrete', { group: 'ttwGate', noFloor: true });
+    rect({ x0: G.pierW.x1, x1: G.pierE.x0, z0: G.z0 + 6, z1: G.z1 - 6 }, G.top, 'steel', { y0: G.lintel0, group: 'ttwGate', noFloor: true });
+    for (const r of TTW.GATE_PLANTERS) rect(r, TTW.PLANTER_H, 'stone', { group: 'ttwPlanter', noFloor: true });
+  }
+  // The blocks beside the south approach (backdrop).
+  for (const b of TTW.SOUTH_BLOCKS) rect(b, b.h, 'bldg', { group: 'ttwBlock', noFloor: true });
+
+  // Street furniture, trees, lamps.
+  for (const p of TTW.TTW_PROPS) {
+    const s = TTW.PROP_SIZE[p.kind], turn = Math.abs(Math.sin(p.ang ?? 0)) > 0.5, y0 = p.y ?? 0;
+    box(p.x, p.z, turn ? s.d : s.w, turn ? s.w : s.d, y0 + s.h, 'metal', { y0, group: 'ttwProp', noFloor: true });
+  }
+  for (const [x, z, h] of TTW.TTW_TREES) tree(x, z, h);
+  for (const l of TTW.TTW_LAMPS) LIGHTS.push({ x: l.x, z: l.z, ang: l.ang, wall: l.wall });
+}
+
 export const WORLD: readonly Prim[] = prims;
 
 /** Green and gravel areas painted on the ground (decoration). */
@@ -1713,7 +1882,7 @@ export const HOTSPOTS: readonly (Point & { name: string; weight: number })[] = [
 
 /** High places snipers hold (stand points on the walkable tops). */
 export const PERCHES: readonly (Point & { y: number })[] = [
-  { x: TOKYO_TOWER.x, y: FOOTTOWN.h, z: TOKYO_TOWER.z },
+  { x: (TTW.RED_TERRACE.x0 + TTW.RED_TERRACE.x1) / 2, y: TTW.RED_H, z: (TTW.RED_TERRACE.z0 + TTW.RED_TERRACE.z1) / 2 }, // 東京タワー RED TERRACE
   { x: ATAGO.x, y: ATAGO.top, z: ATAGO.z },
   { x: UENO_HILL.x + 60, y: UENO_HILL.top, z: UENO_HILL.z + 80 },
   { x: PALACE.x - 80, y: PALACE.top + 90, z: PALACE.z - 250 },
@@ -1735,9 +1904,9 @@ export const SITES = {
   open: { x: PALACE_PLAZA.x, z: PALACE_PLAZA.z },
   /** 2F building: stair foot (on the first step), 2F terrace, and a ground-floor spot under the 2F slab. */
   walkup: WALKUP_KABUKI,
-  /** Tokyo Tower: a point half way up the outdoor stair (it rises northward) and the FootTown roof. */
-  towerStairsMid: { x: TOKYO_TOWER.x, z: TOKYO_TOWER.z + FOOTTOWN.d / 2 + 180, y: FOOTTOWN.h / 2 },
-  towerDeck: { x: TOKYO_TOWER.x, y: FOOTTOWN.h, z: TOKYO_TOWER.z },
+  /** Tokyo Tower (RED HEIGHT): half way up the gate stair to the west terrace (it rises northward), and the terrace. */
+  towerStairsMid: { x: 105, z: 2900, y: 28 },
+  towerDeck: { x: 105, y: TTW.RING_H, z: 2600 },
   /** 上野の山: foot of the WEST RAMP (walk north to climb), the top, and a cliff foot to the north. */
   hillSlopeFoot: { x: (WEST_RAMP.x0 + WEST_RAMP.x1) / 2, z: WEST_RAMP.z1 + 50 },
   hillSlopeDir: { x: 0, z: -1 },

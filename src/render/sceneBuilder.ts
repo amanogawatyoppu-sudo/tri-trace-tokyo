@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BoxPrim, Prim, RampPrim } from '../config/map';
-import { GROUND, KANDA, LANDMARKS, LIGHTS, LOOP, MAST_H, RIVER_WIDTH, STATIONS, STOREY, TOKYO_TOWER_H, TOWER, VIADUCT, WALK_EDGE, WORLD, geo, realHeight } from '../config/map';
+import { GROUND, KANDA, LANDMARKS, LIGHTS, LOOP, MAST_H, RIVER_WIDTH, STATIONS, STOREY, TOWER, VIADUCT, WALK_EDGE, WORLD, geo, realHeight } from '../config/map';
 import { rampHeight } from '../sim/systems/world';
 import { brickFacadeTexture, detailNoise, stoneFacadeTexture, facadeTexture, groundTexture, latticeTexture, stoneTexture, viaductTexture } from './textures';
 import { buildCity } from './city';
@@ -12,6 +12,7 @@ import { buildAkihabara } from './akihabara';
 import { buildUeno } from './ueno';
 import { buildIkebukuro } from './ikebukuro';
 import { buildShinagawa } from './shinagawa';
+import { buildTokyoTower } from './tokyoTower';
 import { buildStairLights } from './stairLights';
 import { buildBases, buildLockPoints } from './objectives';
 import { NIGHT_GLOW } from './nightGlow';
@@ -317,6 +318,8 @@ function buildWorld(scene: THREE.Scene): void {
     if (p.group === 'uenoTree' || p.group === 'uenoHedge' || p.group === 'uenoWall' || p.group === 'uenoRail' || p.group === 'uenoGate' || p.group === 'uenoTrellis' || p.group === 'uenoHall') continue;
     // Shinagawa's deck, arch, forum, canopy and street props are drawn by render/shinagawa.ts.
     if (p.group?.startsWith('shg')) continue;
+    // 東京タワー RED HEIGHT (terraces, stairs, RED TERRACE, gate, rails, legs) is drawn by render/tokyoTower.ts.
+    if (p.group?.startsWith('ttw')) continue;
     if (p.kind === 'ramp') { add(matKey(p), rampGeometry(p)); continue; }
     const b = p as BoxPrim;
     const h = b.y1 - b.y0, key = matKey(b);
@@ -374,30 +377,7 @@ function buildRadioTower(scene: THREE.Scene): THREE.Mesh<THREE.BufferGeometry, T
 /** Tokyo Tower, Tokyo Station's domes, the Diet's pyramid, Tokyo Dome, and landmarks beyond the tracks. */
 function buildLandmarks(scene: THREE.Scene): void {
   const lat = latticeTexture();
-  const orange = std(0xe0501f, { map: lat, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.55 });
-  const white = std(0xf3efe6, { map: lat, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.55 });
-  const solidWhite = std(0xf1ede4, { roughness: 0.5 }), solidOrange = std(0xe0501f, { roughness: 0.5 });
-  const t = LANDMARKS.tokyoTower, H = TOKYO_TOWER_H;
-  const tower = new THREE.Group();
-  tower.position.set(t.x, 0, t.z);
-  // Legs spread to the four corners (±200), then the body tapers to the antenna.
-  const stages: [number, number, number, number][] = [
-    [0, 1100, 225, 115], [1100, 1900, 115, 80], [1900, 2700, 80, 55], [2700, 3000, 55, 50],
-    [3130, 3700, 44, 30], [3700, 4100, 30, 22], [4160, 4600, 16, 8],
-  ];
-  stages.forEach(([y0, y1, r0, r1], i) => tower.add(lattice(y0, y1, r0, r1, i % 2 ? white : orange)));
-  for (const [y0, y1, w] of [[3000, 3130, 170], [4100, 4160, 80]] as const) {
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(w, y1 - y0, w), solidWhite);
-    deck.position.y = (y0 + y1) / 2;
-    tower.add(deck);
-    const band = new THREE.Mesh(new THREE.BoxGeometry(w + 4, 30, w + 4), std(0x3a4652, { roughness: 0.2, metalness: 0.4 }));
-    band.position.y = (y0 + y1) / 2 + 10;
-    tower.add(band);
-  }
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(3, 8, H - 4600, 6), solidOrange);
-  antenna.position.y = 4600 + (H - 4600) / 2;
-  tower.add(antenna);
-  scene.add(shadowed(tower, true, false));
+  // Tokyo Tower is drawn by render/tokyoTower.ts (MAP REFORGE parallel E: RED HEIGHT).
 
   const st = LANDMARKS.tokyoStation;
   const domeMat = std(0x4c5358, { roughness: 0.45, metalness: 0.35 });
@@ -620,6 +600,8 @@ export function buildScene(canvas: HTMLCanvasElement): SceneRefs {
   buildIkebukuro(scene);
   // MAP REFORGE parallel C: 品川 FUTURE GATEWAY.
   buildShinagawa(scene);
+  // MAP REFORGE parallel E: 東京タワー RED HEIGHT (the tower itself included).
+  buildTokyoTower(scene);
   buildStairLights(scene);
   const train = buildRailway(scene);
   // A fixed handful of lamp lights (never more or fewer: that would recompile every material).
