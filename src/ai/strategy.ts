@@ -1,5 +1,6 @@
 import type { NationId } from '../config/nations';
 import { NATION_IDS, NATIONS } from '../config/nations';
+import { AI_SPEED } from '../config/constants';
 import type { GameState } from '../sim/state';
 import { kingOf, timeLeftSec } from '../sim/state';
 import type { SectorId } from '../sim/war';
@@ -48,11 +49,20 @@ export function threatenedSector(state: GameState, n: NationId): SectorId | null
   return best;
 }
 
+/** Whether anyone of nation o was reported near p within the last `ms`. */
+function seenNear(state: GameState, n: NationId, o: NationId, p: { x: number; z: number }, r: number, ms: number): boolean {
+  for (const s of state.factions[n].intel.values()) {
+    if (state.time - s.t > ms || state.entities[s.id].nation !== o) continue;
+    if (Math.hypot(s.x - p.x, s.z - p.z) < r) return true;
+  }
+  return false;
+}
+
 /**
  * Where a kingdom would attack: an enemy or neutral sector touching its own
  * territory (the centre is always in reach). Favoured: the centre, neutral ground,
- * nations that are weaker or already busy fighting someone else (漁夫の利), and
- * somewhere new; far-off sectors count against.
+ * nations that are weaker or already busy fighting someone else (漁夫の利), a sector
+ * our people found left unguarded, and somewhere new; far-off sectors count against.
  */
 export function attackTarget(state: GameState, n: NationId, avoid: SectorId | null): { sector: SectorId; enemy: NationId | null } | null {
   const mine = held(state, n);
@@ -66,8 +76,8 @@ export function attackTarget(state: GameState, n: NationId, avoid: SectorId | nu
     const o = s.owner;
     if (o && !kingOf(state, o)?.alive) continue;
     let score = 1 + state.rng() * 0.8;
-    if (!o) score += 0.6;
-    if (id === CENTRAL) score += 0.7;
+    if (!o) score += 0.3;
+    if (id === CENTRAL) score += 0.6;
     if (o) {
       const rival = others(n).find((x) => x !== o)!;
       if (hostility(state, o, rival) > 1.5) {
@@ -80,7 +90,9 @@ export function attackTarget(state: GameState, n: NationId, avoid: SectorId | nu
       if (state.war.sectors[id].count[o] >= 3) score -= 0.5; // well defended right now
     }
     const p = sectorPoint(id);
-    score -= Math.hypot(p.x - base.x, p.z - base.z) / 5000;
+    // Someone of ours was there lately and saw nobody of theirs near its point: left unguarded, worth the walk.
+    if (o && state.time - state.factions[n].watchedAt[id] < 45000 && !seenNear(state, n, o, p, 900, 15000)) score += 0.5;
+    score -= Math.hypot(p.x - base.x, p.z - base.z) / 8000;
     if (id === avoid) score -= 0.6;
     if (score > bs) { bs = score; best = { sector: id, enemy: o }; }
   }
@@ -212,7 +224,11 @@ export function decideNormal(state: GameState, n: NationId, prev: Strategy): Str
   const towerWant = (hasComm ? 0.3 : 0.15) + (beaconPhase(state) ? tn.kingHunt * 1.4 : 0);
   if (state.tower.owner !== n && state.rng() < towerWant) return { kind: 'TAKE_TOWER', sector: CENTRAL, enemy: state.tower.owner, until };
   const t = attackTarget(state, n, prev.kind === 'ATTACK_SECTOR' ? prev.sector : null);
-  if (t) return { kind: 'ATTACK_SECTOR', sector: t.sector, enemy: t.enemy, until };
+  if (t) {
+    // Give the attack time to get there: a far sector is not dropped before anyone arrives.
+    const p = sectorPoint(t.sector), b = NATIONS[n].base;
+    return { kind: 'ATTACK_SECTOR', sector: t.sector, enemy: t.enemy, until: until + (Math.hypot(p.x - b.x, p.z - b.z) / AI_SPEED) * 1000 };
+  }
   return { kind: 'RECOVER', sector: rearSectors(state, n)[0] ?? null, enemy: null, until };
 }
 
@@ -247,10 +263,11 @@ export function rearPoint(state: GameState, n: NationId): { x: number; z: number
  * Where a king is safest now: the base or one of its own sectors, whichever has the
  * fewest fresh reports of enemies nearby and no fighting (kings avoid the front).
  */
-export function kingRefuge(state: GameState, n: NationId): { x: number; z: number } {
+export function kingRefuge(state: GameState, n: NationId, from?: { x: number; z: number }): { x: number; z: number } {
   const f = state.factions[n];
   const fresh = [...f.intel.values()].filter((s) => state.time - s.t < 12000);
-  const cands: { p: { x: number; z: number }; extra: number }[] = [{ p: NATIONS[n].base, extra: 0 }];
+  // The base is the first place a king hunter looks: a quiet sector of our own is often safer.
+  const cands: { p: { x: number; z: number }; extra: number }[] = [{ p: NATIONS[n].base, extra: 0.8 }];
   for (const id of held(state, n)) {
     const s = state.war.sectors[id];
     const fronts = [...neighbours(id)].filter((b) => { const o = state.war.sectors[b].owner; return o && o !== n; }).length;
@@ -259,7 +276,9 @@ export function kingRefuge(state: GameState, n: NationId): { x: number; z: numbe
   let best = cands[0].p, bs = Infinity;
   for (const c of cands) {
     const near = fresh.filter((s) => Math.hypot(s.x - c.p.x, s.z - c.p.z) < 1100).length;
-    const score = near * 2.5 + c.extra + state.rng() * 1.2;
+    // Settled somewhere quiet: stay (walking across the map is what gets a king seen).
+    const here = from && Math.hypot(from.x - c.p.x, from.z - c.p.z) < 700 ? 0.8 : 0;
+    const score = near * 2.5 + c.extra - here + state.rng() * 1.2;
     if (score < bs) { bs = score; best = c.p; }
   }
   return best;

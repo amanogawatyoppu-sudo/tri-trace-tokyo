@@ -18,7 +18,7 @@ import { canUseDecoy, decoyOf, useDecoy } from '../sim/decoy';
 import { blocked, canWalk, inWater, supportHeight } from '../sim/systems/world';
 import type { AiState, Sighting, Waypoint } from './memory';
 import { chokePoints, navGraph, planPath, randomNodeNear } from './nav';
-import { behind, neighbours, sectorPoint } from '../sim/war';
+import { behind, neighbours, safeRear, sectorPoint } from '../sim/war';
 import { frontSectors, kingRefuge, rearPoint } from './strategy';
 import { PERCEIVE_MS, perceive, predict } from './perception';
 
@@ -44,6 +44,8 @@ function setGoal(state: GameState, e: Entity, goal: Waypoint, st: AiState): void
   ai.state = st;
   const g = ai.goal;
   if (g && Math.hypot(g.x - goal.x, g.z - goal.z) < 45 && Math.abs(g.y - goal.y) < 20 && ai.path) return;
+  // Stepping off a wall: finish that first (a goal that moves every second would cancel it each time).
+  if (ai.detour && state.time < ai.detourUntil) { ai.goal = goal; return; }
   ai.goal = goal;
   ai.path = null;
   ai.detour = false;
@@ -105,16 +107,16 @@ function unstick(state: GameState, e: Entity): void {
     const c = randomNodeNear(e.x, e.y, e.z, 70 + 30 * ai.stuckCount, state.rng);
     if (c && Math.hypot(c.x - e.x, c.z - e.z) > 25 && canWalk(e, c.x, c.y, c.z)) n = { x: c.x, y: c.y, z: c.z };
   }
-  if (n) {
-    ai.path = { points: [n], i: 0, goal: ai.goal };
-    ai.detour = true;
-    ai.detourUntil = now + 2000;
-  } else {
-    // Nowhere to step to: plan again from here, a little later each time (not every frame).
-    ai.path = null;
-    ai.detour = false;
-    ai.replanAt = now + 250 * ai.stuckCount;
+  if (!n) {
+    // No route point to step to (pinned in a pocket the route takes for open ground): sidestep
+    // across the way it was heading, one side or the other, and plan again from there.
+    const wp = ai.path?.points[ai.path.i] ?? ai.goal;
+    const a = Math.atan2(wp.z - e.z, wp.x - e.x) + (state.rng() < 0.5 ? 1 : -1) * (Math.PI / 2);
+    n = { x: e.x + Math.cos(a) * 60, y: e.y, z: e.z + Math.sin(a) * 60 };
   }
+  ai.path = { points: [n], i: 0, goal: ai.goal };
+  ai.detour = true;
+  ai.detourUntil = now + 2000;
 }
 
 /** Following a route while the body stays within 20 units this long is stuck, even if the goal keeps changing. */
@@ -165,7 +167,9 @@ function follow(state: GameState, e: Entity, dt: number, speed: number): void {
   const ai = e.ai, now = state.time;
   plan(state, e);
   const path = ai.path;
-  if (!path) { ai.progressAt = now; bodyMoved(e, now); return; }
+  // Waiting for a route to be planned still counts toward a body going nowhere (an escort whose
+  // goal shifts every second loses its route each time, and would otherwise never be seen stuck).
+  if (!path) { ai.progressAt = now; if (!ai.goal) bodyMoved(e, now); return; }
   let wp = path.points[path.i];
   // Passing points on the way count from a little further off (the turning circle at a run is wider
   // than 12 units: aiming for the exact spot makes people circle it); the destination itself is exact.
@@ -733,7 +737,7 @@ function kingThink(state: GameState, e: Entity): void {
   if (e.ai.goal && e.ai.state !== 'FLEE') return;
   // Kings keep to their own rear territory (not only the base), moving about; bolder ones
   // go as far as their own front sectors, never beyond.
-  let anchor: Point = state.rng() < 0.6 ? kingRefuge(state, e.nation) : rearPoint(state, e.nation);
+  let anchor: Point = state.rng() < 0.6 || !safeRear(state, e.nation).length ? kingRefuge(state, e.nation, e) : rearPoint(state, e.nation);
   if (persona === 'commander' && state.tower.owner === e.nation && state.rng() < 0.5) anchor = TOWER;
   if (persona === 'aggressive' || persona === 'lurker') {
     const front = frontSectors(state, e.nation);

@@ -9,7 +9,7 @@ import { dist } from '../sim/systems/collision';
 import type { Sighting, Task, Waypoint } from './memory';
 import { emit } from '../sim/state';
 import type { SectorId } from '../sim/war';
-import { CENTRAL, POINT_R, proposeTruce, rearSectors, sectorAt, sectorPoint, strength, trucesLeft } from '../sim/war';
+import { CENTRAL, POINT_R, SECTORS, proposeTruce, rearSectors, sectorAt, sectorPoint, strength, trucesLeft } from '../sim/war';
 import { chokePoints } from './nav';
 import { targetOf } from './controller';
 import type { Strategy } from './strategy';
@@ -42,10 +42,12 @@ export interface Faction {
   nextTickAt: number;
   /** Since when the commander could have lit the enemy kings but waited for its hunters. */
   lightWaitFrom: number | null;
+  /** When someone of ours was last in each sector (seen with our own eyes, by sector id). */
+  watchedAt: number[];
 }
 
 export function createFaction(): Faction {
-  return { intel: new Map(), belief: new Map(), posture: 'NORMAL', lastAllyCapturedAt: -Infinity, nextTickAt: 0, lightWaitFrom: null, fight: null, strategy: { ...NO_STRATEGY } };
+  return { intel: new Map(), belief: new Map(), posture: 'NORMAL', lastAllyCapturedAt: -Infinity, nextTickAt: 0, lightWaitFrom: null, fight: null, strategy: { ...NO_STRATEGY }, watchedAt: SECTORS.map(() => -Infinity) };
 }
 
 /**
@@ -413,6 +415,7 @@ export function factionTick(state: GameState): void {
     maybeLightKings(state, n);
     towerIntel(state, n);
     updateBelief(state, n);
+    for (const e of state.entities) if (e.nation === n && e.alive && !e.jailed) f.watchedAt[sectorAt(e.x, e.z)] = state.time;
     formSquads(state, n); // people's squads first (the commander then leaves them alone)
     assign(state, n);
     formSquads(state, n);
