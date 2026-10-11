@@ -8,6 +8,34 @@ import { SECTORS, sectorPoint } from '../sim/war';
 const FULL_NEAREST = 3;
 const EDGE = 28;
 
+/** A screen box in the markers' own coordinates. */
+export interface Box { x0: number; y0: number; x1: number; y1: number }
+
+/** Icon radius (px): the marker's anchor is the icon centre. */
+const R = 15;
+
+/**
+ * Moves a marker (icon centred at x, y; `w` wide including its label) off the HUD boxes
+ * it would sit under: below a box in the upper half of the view (the guide text), above a
+ * box in the lower half (stick, buttons). Both stay readable, nothing is hidden.
+ */
+export function avoidHud(x: number, y: number, w: number, boxes: readonly Box[], viewH: number): number {
+  for (let pass = 0; pass < 2; pass++) {
+    for (const b of boxes) {
+      const hit = x - R < b.x1 && x - R + w > b.x0 && y - R < b.y1 && y + R > b.y0;
+      if (!hit) continue;
+      y = (b.y0 + b.y1) / 2 < viewH / 2 ? b.y1 + R + 2 : b.y0 - R - 2;
+    }
+  }
+  return y;
+}
+
+/** On phones the HUD lies over the 3D view (same breakpoint as the stylesheet). */
+const PHONE_LAYOUT = '(max-width:760px),(max-height:520px)';
+/** HUD pieces markers must not hide under, on phones. */
+const HUD_IDS = ['topbar', 'hintBox', 'joyBase', 'mbtns'];
+const HUD_REFRESH_MS = 500;
+
 interface Marker { el: HTMLDivElement; icon: HTMLSpanElement; name: HTMLSpanElement; dist: HTMLSpanElement; tag: HTMLSpanElement; owner: string }
 
 /**
@@ -19,6 +47,9 @@ interface Marker { el: HTMLDivElement; icon: HTMLSpanElement; name: HTMLSpanElem
 export class ObjectiveMarkers {
   private markers: Marker[] = [];
   private v = new THREE.Vector3();
+  private hud: Box[] = [];
+  private widths: number[] = [];
+  private hudAt = -Infinity;
   private pts = SECTORS.map((_s, i) => { const p = sectorPoint(i); return new THREE.Vector3(p.x, p.y, p.z); });
 
   constructor(private root: HTMLElement) {
@@ -36,8 +67,26 @@ export class ObjectiveMarkers {
     }
   }
 
+  /** HUD boxes and marker widths change only on resize / relabel: read them twice a second, not every frame. */
+  private refreshHud(): void {
+    const now = performance.now();
+    if (now - this.hudAt < HUD_REFRESH_MS) return;
+    this.hudAt = now;
+    this.widths = this.markers.map((m) => m.el.offsetWidth || 2 * R);
+    this.hud = [];
+    if (typeof matchMedia !== 'function' || !matchMedia(PHONE_LAYOUT).matches) return;
+    const o = this.root.getBoundingClientRect();
+    for (const id of HUD_IDS) {
+      const el = document.getElementById(id);
+      const r = id === 'hintBox' ? document.getElementById('hintText')?.getBoundingClientRect() : el?.getBoundingClientRect();
+      if (!r || r.width < 1 || r.height < 1) continue;
+      this.hud.push({ x0: r.left - o.left - 4, y0: r.top - o.top - 2, x1: r.right - o.left + 4, y1: r.bottom - o.top + 2 });
+    }
+  }
+
   sync(state: GameState, camera: THREE.Camera, hidden: boolean): void {
     const W = this.root.clientWidth, H = this.root.clientHeight;
+    if (!hidden) this.refreshHud();
     const p = state.player;
     const d = this.pts.map((q) => Math.hypot(q.x - p.x, q.z - p.z));
     const near = new Set([...d.keys()].sort((a, b) => d[a] - d[b]).slice(0, FULL_NEAREST));
@@ -76,6 +125,7 @@ export class ObjectiveMarkers {
         x = cx + dx; y = cy + dy;
         ang = Math.atan2(dy, dx);
       }
+      if (this.hud.length) y = avoidHud(x, y, off ? 2 * R : this.widths[i] ?? 2 * R, this.hud, H);
       m.el.classList.toggle('off', off);
       m.el.style.setProperty('--ang', ang + 'rad');
       // Far markers get smaller (but stay readable).

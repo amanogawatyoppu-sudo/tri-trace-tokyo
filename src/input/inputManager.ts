@@ -25,6 +25,60 @@ export interface MoveAxes {
 
 const JOY_MAX = 40;
 
+/** Stick: no input inside this share of the ring (a resting or slightly moved thumb). */
+export const STICK_DEAD = 0.2;
+/**
+ * Stick: a push within this angle of straight up / down / left / right counts as exactly
+ * that direction, so walking "straight on" with a thumb that is a little off does not
+ * keep turning the body (sin 15°).
+ */
+export const STICK_AXIS_SNAP = Math.sin((15 * Math.PI) / 180);
+/** Stick output eases toward the finger at this rate (1/s): ~90 % in 0.12 s, no jolts. */
+export const STICK_SMOOTH_RATE = 20;
+
+/**
+ * Raw stick deflection (x right, y down, both in [-1, 1]) to move intent, with a centre
+ * dead zone and axis snapping. Outside them the output grows from 0 continuously, so
+ * there is no jump at the edge; turning grows with the square (fine steering near
+ * straight ahead, full turn when pushed sideways).
+ */
+export function shapeStick(x: number, y: number): { x: number; y: number } {
+  const r = Math.hypot(x, y);
+  if (r <= STICK_DEAD) return { x: 0, y: 0 };
+  const m = Math.min(1, (r - STICK_DEAD) / (1 - STICK_DEAD));
+  const ux = x / r, uy = y / r;
+  const axis = (u: number, curve: number) => {
+    const a = Math.abs(u);
+    if (a <= STICK_AXIS_SNAP) return 0;
+    return Math.sign(u) * Math.pow((a - STICK_AXIS_SNAP) / (1 - STICK_AXIS_SNAP), curve);
+  };
+  // Forward keeps (nearly) full strength on a diagonal push; turning is the fine control.
+  const fy = axis(uy, 1), fx = axis(ux, 2);
+  const fwd = Math.min(1, Math.abs(fy) * 1.25) * Math.sign(fy);
+  return { x: fx * m, y: fwd * m };
+}
+
+/** One smoothing step of the stick output toward `target` over `dtSec` (snaps to 0 when released). */
+export function smoothStick(cur: { x: number; y: number }, target: { x: number; y: number }, dtSec: number): { x: number; y: number } {
+  const k = 1 - Math.exp(-STICK_SMOOTH_RATE * Math.max(0, Math.min(0.1, dtSec)));
+  const step = (c: number, t: number) => {
+    const v = c + (t - c) * k;
+    // A tiny leftover would still count as "turning" (and cancel a quick turn): settle it.
+    return Math.abs(v - t) < 0.02 ? t : v;
+  };
+  return { x: step(cur.x, target.x), y: step(cur.y, target.y) };
+}
+
+/** Phone pinch zoom: the camera distance range (default 160; wheel on PCs keeps its own range). */
+export const PINCH_MIN = 120;
+export const PINCH_MAX = 240;
+
+/** New camera distance for a pinch whose finger gap went from `startGap` to `gap` (spread = closer). */
+export function pinchDistance(startDistance: number, startGap: number, gap: number): number {
+  const d = startDistance * (startGap / Math.max(1, gap));
+  return Math.max(PINCH_MIN, Math.min(PINCH_MAX, d));
+}
+
 /** Movement intent from held keys plus the virtual joystick. */
 export function axesFrom(keys: Readonly<Record<string, boolean>>, joy: { x: number; y: number }): MoveAxes {
   let forward = 0 - joy.y, turn = joy.x;
@@ -49,11 +103,19 @@ export function joystickVector(dx: number, dy: number): { x: number; y: number; 
  */
 export class InputManager {
   private keys: Record<string, boolean> = {};
+  /** Raw stick deflection (the finger), and the shaped, eased output the game reads. */
   private joy = { x: 0, y: 0 };
+  private joyOut = { x: 0, y: 0 };
+  private joyAt = 0;
   private touchDash = false;
   private lookDX = 0;
   private lookDY = 0;
   private zoom = 0;
+  /** Camera distance requested by a pinch (null when there is none to apply). */
+  private pinchTo: number | null = null;
+  private pinchFrom: { gap: number; distance: number } | null = null;
+  /** Current camera distance, for starting a pinch (set by the frame loop). */
+  cameraDistance = 160;
 
   constructor(canvas: HTMLCanvasElement, handlers: InputHandlers) {
     window.addEventListener('keydown', (e) => {
@@ -92,7 +154,7 @@ export class InputManager {
     for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('#squadBox [data-order]'))) {
       b.addEventListener('click', action(() => handlers.onSquad(b.dataset.order as 'follow' | 'spread' | 'hold')));
     }
-    this.bindDash(byId('mDash'));
+    this.bindDash(byId('mDash'), byId('mCap'), action(handlers.onCapture));
     this.bindJoystick(byId('joyBase'), byId('joyStick'));
     this.bindCamera(canvas);
   }
@@ -101,13 +163,27 @@ export class InputManager {
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); fn(); });
   }
 
-  private bindDash(el: HTMLElement): void {
+  /**
+   * Dash is held while its finger stays down. Sliding that finger onto TRACE fires TRACE
+   * and keeps dashing, so one thumb does both (press dash, roll onto TRACE).
+   */
+  private bindDash(el: HTMLElement, cap: HTMLElement, onCapture: () => void): void {
+    let onCap = false;
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
       this.touchDash = true;
+      onCap = false;
     });
-    const off = () => { this.touchDash = false; };
+    el.addEventListener('pointermove', (e) => {
+      if (!this.touchDash) return;
+      const r = cap.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (inside && !onCap) onCapture();
+      onCap = inside;
+      cap.classList.toggle('slid', inside);
+    });
+    const off = () => { this.touchDash = false; onCap = false; cap.classList.remove('slid'); };
     el.addEventListener('pointerup', off);
     el.addEventListener('pointercancel', off);
     el.addEventListener('lostpointercapture', off);
@@ -141,23 +217,39 @@ export class InputManager {
     base.addEventListener('lostpointercapture', reset);
   }
 
+  /**
+   * One finger on the 3D view tilts the camera; two fingers pinch to zoom. Only touches
+   * that start on the view itself count: a finger that went down on the stick or a
+   * button never reaches here, so it can't move the camera.
+   */
   private bindCamera(canvas: HTMLCanvasElement): void {
-    let id: number | null = null, lastX = 0, lastY = 0;
+    const pts = new Map<number, { x: number; y: number }>();
+    let lookId: number | null = null;
+    const gap = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
     canvas.addEventListener('pointerdown', (e) => {
-      if (id !== null) return;
-      id = e.pointerId;
-      lastX = e.clientX;
-      lastY = e.clientY;
+      if (pts.size >= 2) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       canvas.setPointerCapture(e.pointerId);
+      if (pts.size === 1) lookId = e.pointerId;
+      else { lookId = null; this.pinchFrom = { gap: gap(), distance: this.cameraDistance }; }
     });
     canvas.addEventListener('pointermove', (e) => {
-      if (e.pointerId !== id) return;
-      this.lookDX += e.clientX - lastX;
-      this.lookDY += e.clientY - lastY;
-      lastX = e.clientX;
-      lastY = e.clientY;
+      const q = pts.get(e.pointerId);
+      if (!q) return;
+      if (e.pointerId === lookId) {
+        this.lookDX += e.clientX - q.x;
+        this.lookDY += e.clientY - q.y;
+      }
+      q.x = e.clientX;
+      q.y = e.clientY;
+      if (pts.size === 2 && this.pinchFrom) this.pinchTo = pinchDistance(this.pinchFrom.distance, this.pinchFrom.gap, gap());
     });
-    const end = (e: PointerEvent) => { if (e.pointerId === id) id = null; };
+    const end = (e: PointerEvent) => {
+      if (!pts.delete(e.pointerId)) return;
+      if (e.pointerId === lookId) lookId = null;
+      // After a pinch the remaining finger does not start tilting (it would jolt the view).
+      if (pts.size < 2) this.pinchFrom = null;
+    };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
     canvas.addEventListener('lostpointercapture', end);
@@ -165,8 +257,12 @@ export class InputManager {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  moveAxes(): MoveAxes {
-    return axesFrom(this.keys, this.joy);
+  /** Keyboard as before; the stick through its dead zone, axis snap and easing. */
+  moveAxes(now = performance.now()): MoveAxes {
+    const dt = this.joyAt ? (now - this.joyAt) / 1000 : 1 / 60;
+    this.joyAt = now;
+    this.joyOut = smoothStick(this.joyOut, shapeStick(this.joy.x, this.joy.y), dt);
+    return axesFrom(this.keys, this.joyOut);
   }
 
   get dash(): boolean {
@@ -183,6 +279,13 @@ export class InputManager {
     const out = { dx: this.lookDX, dy: this.lookDY };
     this.lookDX = this.lookDY = 0;
     return out;
+  }
+
+  /** Returns and clears the camera distance a pinch asked for (null: no pinch since last call). */
+  consumePinch(): number | null {
+    const d = this.pinchTo;
+    this.pinchTo = null;
+    return d;
   }
 
   /** Returns and clears accumulated wheel steps (+ = zoom out). */

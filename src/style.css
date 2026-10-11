@@ -750,3 +750,19 @@ body.tutorial #eventCard{top:auto;bottom:40%}
 @keyframes acHot{50%{background:var(--ac);color:#111}}
 @media (max-width:700px){#anchorClocks{top:64px;flex-direction:column;align-items:center}#anchorClocks .ac-chip{font-size:10px}}
 @media (prefers-reduced-motion:reduce){#edgeFx.ef-on,#edgeFx.ef-strong,#anchorClocks .ac-hot{animation:none}}
+
+/* ===== Mobile control quality phase 1: stick catch zone, one-thumb dash + TRACE, full-size squad button ===== */
+/* A thumb that lands just outside the ring still takes the stick (it used to tilt the camera instead). */
+#joyBase::before{content:'';position:absolute;inset:-26px;border-radius:50%}
+@media (max-width:760px),(max-height:520px){
+  /* Right thumb: TRACE is the big corner button, dash sits right next to it on the same row; slide from dash onto TRACE to fire it while still dashing. */
+  #mbtns{grid-template-columns:60px 68px;grid-template-areas:"stam stam" "sq ping" "face spec" "dash cap";gap:8px 6px;align-items:center;justify-items:center}
+  #mStamWrap{justify-self:stretch;align-self:end}
+  #mbtns #mSquad{width:60px;height:52px;border-radius:26px;font-size:12px;line-height:1.1}
+  #mbtns #mSquad small{font-size:10px}
+  #mbtns #mPing{width:52px;height:52px;border-radius:50%}
+  #mbtns #mDash{width:60px;height:60px}
+  #mbtns #mCap{width:68px;height:68px;font-size:13px}
+  #mbtns #mCap small{font-size:9px}
+  #mbtns #mCap.slid{background:radial-gradient(circle at 50% 35%,#5fbf86,#1d5a37);box-shadow:0 0 0 2px #c9f5d6,0 0 18px rgba(125,207,154,.9)}
+}

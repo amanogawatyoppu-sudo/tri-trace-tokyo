@@ -364,6 +364,9 @@ function startGame(nation: NationId, role: RoleId, size: RosterSize, mode: Mode 
     const look = input.consumeLook();
     cam.applyLook(look.dx, look.dy);
     cam.applyZoom(input.consumeZoom());
+    const pinch = input.consumePinch();
+    if (pinch !== null) cam.distance = pinch;
+    input.cameraDistance = cam.distance;
     const axes = input.moveAxes();
     state.input = { forward: axes.forward, turn: axes.turn, dash: input.dash };
     if (client) mirror(frameMs);
